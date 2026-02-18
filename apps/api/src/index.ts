@@ -11,6 +11,7 @@ import {
   PgAuthRepository
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
+import { rankCandidates } from "./scoring.js";
 import { computeValuation } from "./valuation.js";
 
 declare module "fastify" {
@@ -43,6 +44,11 @@ type ValuationRequestBody = {
   condition?: string;
   baseValueUsd?: number;
   comps?: ValuationCompInput[];
+};
+
+type ScoringRequestBody = {
+  currentItemValueUsd?: number;
+  limit?: number;
 };
 
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
@@ -348,6 +354,24 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       });
 
       return reply.status(201).send(saved);
+    }
+  );
+
+  app.post<{ Body: ScoringRequestBody }>(
+    "/scoring/rank",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const currentItemValueUsd = request.body.currentItemValueUsd;
+      const limit = typeof request.body.limit === "number" ? request.body.limit : 10;
+
+      if (typeof currentItemValueUsd !== "number" || currentItemValueUsd <= 0) {
+        return reply.status(400).send({ error: "currentItemValueUsd must be a positive number" });
+      }
+
+      const candidates = await authRepository.listScoringCandidates(limit);
+      const ranked = rankCandidates(candidates, currentItemValueUsd, Math.max(1, Math.min(limit, 50)));
+
+      return reply.status(200).send({ ranked });
     }
   );
 

@@ -80,6 +80,17 @@ class InMemoryAuthRepository implements AuthRepository {
       modelVersion: input.modelVersion
     };
   }
+
+  async listScoringCandidates(limit: number) {
+    return Array.from(this.opportunitiesByDedupeKey.values())
+      .map((opportunity) => ({
+        opportunityId: opportunity.id,
+        targetValueUsd: opportunity.askValueUsd,
+        source: opportunity.source,
+        category: opportunity.category
+      }))
+      .slice(0, limit);
+  }
 }
 
 describe("api auth and authorization", () => {
@@ -304,5 +315,34 @@ describe("api auth and authorization", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("returns ranked trade candidates", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "Craigslist",
+        category: "Electronics",
+        location: "San Francisco, CA",
+        title: "Nintendo Switch",
+        priceUsd: 250
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/scoring/rank",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        currentItemValueUsd: 100,
+        limit: 5
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().ranked).toHaveLength(1);
+    expect(response.json().ranked[0]).toHaveProperty("tradeScore");
   });
 });

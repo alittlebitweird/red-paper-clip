@@ -72,6 +72,15 @@ export type ValuationRecord = {
   modelVersion: string;
 };
 
+export type ScoringCandidateRecord = {
+  opportunityId: number;
+  targetValueUsd: number;
+  source: string;
+  category: string;
+  sellerRepScore?: number;
+  expiresAt?: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -80,6 +89,7 @@ export interface AuthRepository {
   createOpportunity(input: OpportunityCreateInput): Promise<OpportunityRecord>;
   listOpportunities(options: OpportunityListOptions): Promise<OpportunityRecord[]>;
   recordValuation(input: RecordValuationInput): Promise<ValuationRecord>;
+  listScoringCandidates(limit: number): Promise<ScoringCandidateRecord[]>;
   close?: () => Promise<void>;
 }
 
@@ -326,6 +336,36 @@ export class PgAuthRepository implements AuthRepository {
       await this.pool.query("ROLLBACK");
       throw error;
     }
+  }
+
+  async listScoringCandidates(limit: number): Promise<ScoringCandidateRecord[]> {
+    const boundedLimit = Math.max(1, Math.min(limit, 200));
+    const result = await this.pool.query<{
+      id: number;
+      ask_value_usd: string;
+      source: string;
+      category: string;
+      seller_rep_score: string | null;
+      expires_at: string | null;
+    }>(
+      `
+      SELECT id, ask_value_usd, source, category, seller_rep_score, expires_at
+      FROM opportunities
+      WHERE status IN ('sourcing', 'screened')
+      ORDER BY created_at DESC
+      LIMIT $1
+      `,
+      [boundedLimit]
+    );
+
+    return result.rows.map((row) => ({
+      opportunityId: row.id,
+      targetValueUsd: Number(row.ask_value_usd),
+      source: row.source,
+      category: row.category,
+      sellerRepScore: row.seller_rep_score ? Number(row.seller_rep_score) : undefined,
+      expiresAt: row.expires_at ?? undefined
+    }));
   }
 
   async close(): Promise<void> {

@@ -63,3 +63,7 @@ npm run db:migrate:down -w @rpc/db
 - `POST /valuations` (roles: `admin`, `operator`)
 - Computes `estimatedValueUsd` + `confidenceScore` using `rules-v1`
 - Persists a versioned record in `item_valuations`
+
+## Scoring API
+- `POST /scoring/rank` (roles: `admin`, `operator`)
+- Ranks current opportunities using weighted trade-score formula
