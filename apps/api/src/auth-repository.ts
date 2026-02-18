@@ -48,6 +48,30 @@ export type OpportunityListOptions = {
   limit?: number;
 };
 
+export type ValuationCompInput = {
+  priceUsd: number;
+  source?: string;
+};
+
+export type RecordValuationInput = {
+  itemId?: number;
+  title: string;
+  category: string;
+  condition?: string;
+  estimatedValueUsd: number;
+  confidenceScore: number;
+  modelVersion: string;
+  comps: ValuationCompInput[];
+};
+
+export type ValuationRecord = {
+  valuationId: number;
+  itemId: number;
+  estimatedValueUsd: number;
+  confidenceScore: number;
+  modelVersion: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -55,6 +79,7 @@ export interface AuthRepository {
   findOpportunityByDedupeKey(dedupeKey: string): Promise<OpportunityRecord | null>;
   createOpportunity(input: OpportunityCreateInput): Promise<OpportunityRecord>;
   listOpportunities(options: OpportunityListOptions): Promise<OpportunityRecord[]>;
+  recordValuation(input: RecordValuationInput): Promise<ValuationRecord>;
   close?: () => Promise<void>;
 }
 
@@ -230,6 +255,77 @@ export class PgAuthRepository implements AuthRepository {
       dedupeKey: row.dedupe_key,
       createdAt: row.created_at
     }));
+  }
+
+  async recordValuation(input: RecordValuationInput): Promise<ValuationRecord> {
+    await this.pool.query("BEGIN");
+
+    try {
+      let itemId = input.itemId;
+
+      if (!itemId) {
+        const itemInsert = await this.pool.query<{ id: number }>(
+          `
+          INSERT INTO items (title, category, condition, est_value_usd)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id
+          `,
+          [input.title, input.category, input.condition ?? null, input.estimatedValueUsd]
+        );
+        itemId = itemInsert.rows[0].id;
+      } else {
+        await this.pool.query(
+          `
+          UPDATE items
+          SET est_value_usd = $1, updated_at = NOW()
+          WHERE id = $2
+          `,
+          [input.estimatedValueUsd, itemId]
+        );
+      }
+
+      const valuationInsert = await this.pool.query<{
+        id: number;
+        item_id: number;
+        estimated_value_usd: string;
+        confidence_score: string;
+        model_version: string;
+      }>(
+        `
+        INSERT INTO item_valuations (
+          item_id,
+          model_version,
+          estimated_value_usd,
+          confidence_score,
+          input_comps
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        RETURNING id, item_id, estimated_value_usd, confidence_score, model_version
+        `,
+        [
+          itemId,
+          input.modelVersion,
+          input.estimatedValueUsd,
+          input.confidenceScore,
+          JSON.stringify(input.comps)
+        ]
+      );
+
+      await this.pool.query("COMMIT");
+
+      const row = valuationInsert.rows[0];
+
+      return {
+        valuationId: row.id,
+        itemId: row.item_id,
+        estimatedValueUsd: Number(row.estimated_value_usd),
+        confidenceScore: Number(row.confidence_score),
+        modelVersion: row.model_version
+      };
+    } catch (error) {
+      await this.pool.query("ROLLBACK");
+      throw error;
+    }
   }
 
   async close(): Promise<void> {

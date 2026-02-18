@@ -17,6 +17,8 @@ class InMemoryAuthRepository implements AuthRepository {
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
+  private itemIdSequence = 1;
+  private valuationIdSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -57,6 +59,26 @@ class InMemoryAuthRepository implements AuthRepository {
   async listOpportunities(options: { status?: string; limit?: number }): Promise<OpportunityRecord[]> {
     const limit = options.limit ?? 50;
     return Array.from(this.opportunitiesByDedupeKey.values()).slice(0, limit);
+  }
+
+  async recordValuation(input: {
+    itemId?: number;
+    title: string;
+    category: string;
+    condition?: string;
+    estimatedValueUsd: number;
+    confidenceScore: number;
+    modelVersion: string;
+    comps: Array<{ priceUsd: number; source?: string }>;
+  }) {
+    const itemId = input.itemId ?? this.itemIdSequence++;
+    return {
+      valuationId: this.valuationIdSequence++,
+      itemId,
+      estimatedValueUsd: input.estimatedValueUsd,
+      confidenceScore: input.confidenceScore,
+      modelVersion: input.modelVersion
+    };
   }
 }
 
@@ -244,5 +266,43 @@ describe("api auth and authorization", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().opportunities).toHaveLength(1);
+  });
+
+  it("records a valuation and returns versioned output", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/valuations",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Nintendo Switch",
+        category: "Electronics",
+        baseValueUsd: 220,
+        comps: [{ priceUsd: 210 }, { priceUsd: 230 }, { priceUsd: 225 }]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().modelVersion).toBe("rules-v1");
+    expect(repository.events).toContainEqual(
+      expect.objectContaining({
+        eventType: "valuation.recorded",
+        entityType: "item"
+      })
+    );
+  });
+
+  it("validates valuation payload requirements", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/valuations",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "",
+        category: "",
+        comps: []
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 });

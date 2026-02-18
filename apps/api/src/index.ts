@@ -4,13 +4,14 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
 import {
   type AuthRepository,
-  type OpportunityCreateInput,
   type AuthUser,
   type PolicyRuleInput,
   type UserRole,
+  type ValuationCompInput,
   PgAuthRepository
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
+import { computeValuation } from "./valuation.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -35,13 +36,30 @@ type OpportunityListQuery = {
   limit?: number;
 };
 
+type ValuationRequestBody = {
+  itemId?: number;
+  title?: string;
+  category?: string;
+  condition?: string;
+  baseValueUsd?: number;
+  comps?: ValuationCompInput[];
+};
+
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
 
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 
 const parseOpportunityInput = (
   body: OpportunityIntakeBody
-): ValidationResult<OpportunityCreateInput> => {
+): ValidationResult<{
+  source: string;
+  category: string;
+  location: string;
+  title: string;
+  askValueUsd: number;
+  normalizedPayload: Record<string, unknown>;
+  dedupeKey: string;
+}> => {
   const source = typeof body.source === "string" ? normalizeText(body.source) : "";
   const category = typeof body.category === "string" ? normalizeText(body.category) : "";
   const location = typeof body.location === "string" ? normalizeText(body.location) : "";
@@ -75,6 +93,43 @@ const parseOpportunityInput = (
         priceUsd: roundedPrice,
         normalizationVersion: 1
       }
+    }
+  };
+};
+
+const parseValuationInput = (body: ValuationRequestBody) => {
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  const category = typeof body.category === "string" ? normalizeText(body.category) : "";
+  const condition = typeof body.condition === "string" ? normalizeText(body.condition) : undefined;
+  const baseValueUsd = typeof body.baseValueUsd === "number" ? body.baseValueUsd : undefined;
+  const itemId = typeof body.itemId === "number" ? body.itemId : undefined;
+
+  const comps = Array.isArray(body.comps)
+    ? body.comps
+        .filter((comp) => comp && typeof comp.priceUsd === "number" && comp.priceUsd > 0)
+        .map((comp) => ({ priceUsd: Number(comp.priceUsd.toFixed(2)), source: comp.source }))
+    : [];
+
+  if (!title || !category) {
+    return { valid: false as const, error: "title and category are required" };
+  }
+
+  if ((baseValueUsd === undefined || baseValueUsd <= 0) && comps.length === 0) {
+    return {
+      valid: false as const,
+      error: "Provide at least one positive comp or a positive baseValueUsd"
+    };
+  }
+
+  return {
+    valid: true as const,
+    value: {
+      itemId,
+      title,
+      category,
+      condition,
+      baseValueUsd,
+      comps
     }
   };
 };
@@ -245,6 +300,54 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       });
 
       return reply.status(200).send({ opportunities });
+    }
+  );
+
+  app.post<{ Body: ValuationRequestBody }>(
+    "/valuations",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const parsed = parseValuationInput(request.body);
+
+      if (!parsed.valid) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+
+      const valuation = computeValuation({
+        baseValueUsd: parsed.value.baseValueUsd,
+        comps: parsed.value.comps
+      });
+
+      const saved = await authRepository.recordValuation({
+        itemId: parsed.value.itemId,
+        title: parsed.value.title,
+        category: parsed.value.category,
+        condition: parsed.value.condition,
+        estimatedValueUsd: valuation.estimatedValueUsd,
+        confidenceScore: valuation.confidenceScore,
+        modelVersion: valuation.modelVersion,
+        comps: parsed.value.comps
+      });
+
+      await authRepository.writeEvent({
+        eventType: "valuation.recorded",
+        entityType: "item",
+        entityId: String(saved.itemId),
+        payload: {
+          actorUserId: user.id,
+          role: user.role,
+          valuationId: saved.valuationId,
+          modelVersion: saved.modelVersion
+        }
+      });
+
+      return reply.status(201).send(saved);
     }
   );
 

@@ -58,3 +58,8 @@ npm run db:migrate:down -w @rpc/db
 ## Opportunity API
 - `POST /opportunities` (roles: `admin`, `operator`)
 - `GET /opportunities` (roles: `admin`, `operator`, `reviewer`)
+
+## Valuation API
+- `POST /valuations` (roles: `admin`, `operator`)
+- Computes `estimatedValueUsd` + `confidenceScore` using `rules-v1`
+- Persists a versioned record in `item_valuations`
