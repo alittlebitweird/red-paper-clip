@@ -27,6 +27,8 @@ This starts:
 - API on `API_PORT` (default `3001`)
 - Worker heartbeat loop (`WORKER_HEARTBEAT_MS`)
 
+For auth-enabled API routes, ensure `DATABASE_URL` is configured and seed users are loaded.
+
 ## Validation commands
 ```bash
 npm run lint
@@ -45,3 +47,8 @@ To roll back one migration:
 ```bash
 npm run db:migrate:down -w @rpc/db
 ```
+
+## Default seeded API keys
+- `ADMIN_API_KEY` (default `dev-admin-key`)
+- `OPERATOR_API_KEY` (default `dev-operator-key`)
+- `REVIEWER_API_KEY` (default `dev-reviewer-key`)

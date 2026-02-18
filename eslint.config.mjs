@@ -17,7 +17,8 @@ export default [
         "error",
         {
           checksVoidReturn: {
-            attributes: false
+            attributes: false,
+            properties: false
           }
         }
       ]
