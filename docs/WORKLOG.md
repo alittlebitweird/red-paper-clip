@@ -21,6 +21,8 @@
 - Implemented `RPC-006`: valuation engine, confidence scoring, and versioned persistence (`ee3e8ee`).
 - Updated local trackers for `RPC-006` completion (`7e699f0`).
 - Implemented `RPC-007`: weighted scoring engine and ranked opportunity endpoint (`f0f5c45`).
+- Updated local trackers for `RPC-007` completion (`777688b`).
+- Implemented `RPC-008`: policy guard middleware for outbound actions (`7e84085`).
 
 ## Log Format
 - Date

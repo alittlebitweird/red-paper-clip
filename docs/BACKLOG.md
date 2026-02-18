@@ -12,7 +12,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-007 Scoring engine v1
 
 ## Milestone 2: Execution and Compliance (Week 2)
-- [ ] RPC-008 Policy guard middleware
+- [x] RPC-008 Policy guard middleware
 - [ ] RPC-009 Offer workflow and approval queue
 - [ ] RPC-010 Human execution adapter (RentAHuman interface)
 - [ ] RPC-011 Evidence capture pipeline
