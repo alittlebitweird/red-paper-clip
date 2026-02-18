@@ -27,6 +27,8 @@
 - Implemented `RPC-009`: draft/approve/reject/send offer workflow with state transitions (`a52dfbd`).
 - Updated local trackers for `RPC-009` completion (`7fa9445`).
 - Implemented `RPC-010`: task-provider adapter and webhook status updates (`f4f4994`).
+- Updated local trackers for `RPC-010` completion (`4b075a6`).
+- Implemented `RPC-011`: evidence capture and retrieval pipeline linked to tasks (`2eab9be`).
 
 ## Log Format
 - Date

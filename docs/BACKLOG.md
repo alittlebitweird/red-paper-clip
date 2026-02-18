@@ -15,7 +15,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-008 Policy guard middleware
 - [x] RPC-009 Offer workflow and approval queue
 - [x] RPC-010 Human execution adapter (RentAHuman interface)
-- [ ] RPC-011 Evidence capture pipeline
+- [x] RPC-011 Evidence capture pipeline
 - [ ] RPC-012 Verification checklist
 - [ ] RPC-013 Portfolio state machine
 
