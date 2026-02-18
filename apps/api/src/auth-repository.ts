@@ -1,5 +1,7 @@
 import { Pool } from "pg";
 
+import { type PortfolioStatus } from "./portfolio-state-machine.js";
+
 export type UserRole = "admin" | "operator" | "reviewer";
 
 export type AuthUser = {
@@ -126,6 +128,27 @@ export type EvidenceRecord = {
   createdAt: string;
 };
 
+export type PortfolioPositionRecord = {
+  id: number;
+  itemId: number;
+  acquiredAt: string;
+  acquisitionValueUsd?: number;
+  currentStatus: PortfolioStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PortfolioVerificationChecklistRecord = {
+  id: number;
+  portfolioPositionId: number;
+  checks: Record<string, boolean>;
+  passed: boolean;
+  outcomeStatus: "verified" | "failed" | "disputed";
+  createdByUserId: string;
+  notes?: string;
+  createdAt: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -156,6 +179,29 @@ export interface AuthRepository {
     capturedAt: string;
   }): Promise<EvidenceRecord>;
   listEvidenceByTaskId(taskId: number): Promise<EvidenceRecord[]>;
+  createPortfolioPosition(input: {
+    title: string;
+    category?: string;
+    condition?: string;
+    location?: string;
+    acquisitionValueUsd?: number;
+  }): Promise<PortfolioPositionRecord>;
+  getPortfolioPositionById(positionId: number): Promise<PortfolioPositionRecord | null>;
+  updatePortfolioPositionStatus(
+    positionId: number,
+    status: PortfolioStatus
+  ): Promise<PortfolioPositionRecord | null>;
+  createPortfolioVerificationChecklist(input: {
+    portfolioPositionId: number;
+    checks: Record<string, boolean>;
+    passed: boolean;
+    outcomeStatus: "verified" | "failed" | "disputed";
+    createdByUserId: string;
+    notes?: string;
+  }): Promise<PortfolioVerificationChecklistRecord>;
+  listPortfolioVerificationChecklists(
+    portfolioPositionId: number
+  ): Promise<PortfolioVerificationChecklistRecord[]>;
   close?: () => Promise<void>;
 }
 
@@ -740,6 +786,242 @@ export class PgAuthRepository implements AuthRepository {
       checksum: row.checksum,
       geotag: row.geotag ?? undefined,
       capturedAt: row.captured_at,
+      createdAt: row.created_at
+    }));
+  }
+
+  async createPortfolioPosition(input: {
+    title: string;
+    category?: string;
+    condition?: string;
+    location?: string;
+    acquisitionValueUsd?: number;
+  }): Promise<PortfolioPositionRecord> {
+    await this.pool.query("BEGIN");
+
+    try {
+      const itemResult = await this.pool.query<{ id: number }>(
+        `
+        INSERT INTO items (title, category, condition, location, est_value_usd)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        `,
+        [
+          input.title,
+          input.category ?? "uncategorized",
+          input.condition ?? null,
+          input.location ?? null,
+          input.acquisitionValueUsd ?? null
+        ]
+      );
+
+      const positionResult = await this.pool.query<{
+        id: number;
+        item_id: number;
+        acquired_at: string;
+        acquisition_value_usd: string | null;
+        current_status: PortfolioStatus;
+        created_at: string;
+        updated_at: string;
+      }>(
+        `
+        INSERT INTO portfolio_positions (item_id, acquisition_value_usd, current_status)
+        VALUES ($1, $2, 'seeded')
+        RETURNING id, item_id, acquired_at, acquisition_value_usd, current_status, created_at, updated_at
+        `,
+        [itemResult.rows[0].id, input.acquisitionValueUsd ?? null]
+      );
+
+      await this.pool.query("COMMIT");
+      const row = positionResult.rows[0];
+
+      return {
+        id: row.id,
+        itemId: row.item_id,
+        acquiredAt: row.acquired_at,
+        acquisitionValueUsd: row.acquisition_value_usd ? Number(row.acquisition_value_usd) : undefined,
+        currentStatus: row.current_status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    } catch (error) {
+      await this.pool.query("ROLLBACK");
+      throw error;
+    }
+  }
+
+  async getPortfolioPositionById(positionId: number): Promise<PortfolioPositionRecord | null> {
+    const result = await this.pool.query<{
+      id: number;
+      item_id: number;
+      acquired_at: string;
+      acquisition_value_usd: string | null;
+      current_status: PortfolioStatus;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `
+      SELECT id, item_id, acquired_at, acquisition_value_usd, current_status, created_at, updated_at
+      FROM portfolio_positions
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [positionId]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      itemId: row.item_id,
+      acquiredAt: row.acquired_at,
+      acquisitionValueUsd: row.acquisition_value_usd ? Number(row.acquisition_value_usd) : undefined,
+      currentStatus: row.current_status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async updatePortfolioPositionStatus(
+    positionId: number,
+    status: PortfolioStatus
+  ): Promise<PortfolioPositionRecord | null> {
+    const result = await this.pool.query<{
+      id: number;
+      item_id: number;
+      acquired_at: string;
+      acquisition_value_usd: string | null;
+      current_status: PortfolioStatus;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `
+      UPDATE portfolio_positions
+      SET current_status = $2, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, item_id, acquired_at, acquisition_value_usd, current_status, created_at, updated_at
+      `,
+      [positionId, status]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      itemId: row.item_id,
+      acquiredAt: row.acquired_at,
+      acquisitionValueUsd: row.acquisition_value_usd ? Number(row.acquisition_value_usd) : undefined,
+      currentStatus: row.current_status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async createPortfolioVerificationChecklist(input: {
+    portfolioPositionId: number;
+    checks: Record<string, boolean>;
+    passed: boolean;
+    outcomeStatus: "verified" | "failed" | "disputed";
+    createdByUserId: string;
+    notes?: string;
+  }): Promise<PortfolioVerificationChecklistRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      portfolio_position_id: number;
+      checks: Record<string, boolean>;
+      passed: boolean;
+      outcome_status: "verified" | "failed" | "disputed";
+      created_by_user_id: string;
+      notes: string | null;
+      created_at: string;
+    }>(
+      `
+      INSERT INTO portfolio_verification_checklists (
+        portfolio_position_id,
+        checks,
+        passed,
+        outcome_status,
+        created_by_user_id,
+        notes
+      )
+      VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+      RETURNING
+        id,
+        portfolio_position_id,
+        checks,
+        passed,
+        outcome_status,
+        created_by_user_id,
+        notes,
+        created_at
+      `,
+      [
+        input.portfolioPositionId,
+        JSON.stringify(input.checks),
+        input.passed,
+        input.outcomeStatus,
+        input.createdByUserId,
+        input.notes ?? null
+      ]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      portfolioPositionId: row.portfolio_position_id,
+      checks: row.checks,
+      passed: row.passed,
+      outcomeStatus: row.outcome_status,
+      createdByUserId: row.created_by_user_id,
+      notes: row.notes ?? undefined,
+      createdAt: row.created_at
+    };
+  }
+
+  async listPortfolioVerificationChecklists(
+    portfolioPositionId: number
+  ): Promise<PortfolioVerificationChecklistRecord[]> {
+    const result = await this.pool.query<{
+      id: number;
+      portfolio_position_id: number;
+      checks: Record<string, boolean>;
+      passed: boolean;
+      outcome_status: "verified" | "failed" | "disputed";
+      created_by_user_id: string;
+      notes: string | null;
+      created_at: string;
+    }>(
+      `
+      SELECT
+        id,
+        portfolio_position_id,
+        checks,
+        passed,
+        outcome_status,
+        created_by_user_id,
+        notes,
+        created_at
+      FROM portfolio_verification_checklists
+      WHERE portfolio_position_id = $1
+      ORDER BY created_at DESC
+      `,
+      [portfolioPositionId]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      portfolioPositionId: row.portfolio_position_id,
+      checks: row.checks,
+      passed: row.passed,
+      outcomeStatus: row.outcome_status,
+      createdByUserId: row.created_by_user_id,
+      notes: row.notes ?? undefined,
       createdAt: row.created_at
     }));
   }

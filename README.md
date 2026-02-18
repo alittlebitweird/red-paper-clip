@@ -86,3 +86,14 @@ npm run db:migrate:down -w @rpc/db
 - `POST /tasks/webhook/provider` updates task status from provider callbacks (`x-webhook-token`)
 - `POST /tasks/:taskId/evidence` stores proof metadata with checksum and capture timestamp
 - `GET /tasks/:taskId/evidence` retrieves evidence by task
+
+## Portfolio State API
+- `POST /portfolio/positions` creates a seeded portfolio position
+- `POST /portfolio/positions/:positionId/transition` enforces allowed state transitions
+- `GET /portfolio/positions/:positionId` fetches current position state
+
+## Verification Checklist API
+- `POST /portfolio/positions/:positionId/verification-checklist` runs required checks
+- Position must be in `accepted_pending_verification`
+- Passing checks move to `verified`; failed checks move to `failed` or `disputed`
+- `GET /portfolio/positions/:positionId/verification-checklist` lists checklist history

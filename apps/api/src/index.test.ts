@@ -10,6 +10,7 @@ import {
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
 import { buildServer } from "./index.js";
+import { type PortfolioStatus } from "./portfolio-state-machine.js";
 import { type TaskProvider } from "./task-provider.js";
 
 class DeterministicTaskProvider implements TaskProvider {
@@ -32,6 +33,8 @@ class InMemoryAuthRepository implements AuthRepository {
   private readonly tasksById = new Map<number, { id: number; type: "inspect" | "pickup" | "meet" | "ship"; assignee?: string; status: "queued" | "in_progress" | "completed" | "failed"; providerName: string; providerTaskId?: string; updatedAt: string }>();
   private readonly tasksByProviderTaskId = new Map<string, { id: number; type: "inspect" | "pickup" | "meet" | "ship"; assignee?: string; status: "queued" | "in_progress" | "completed" | "failed"; providerName: string; providerTaskId?: string; updatedAt: string }>();
   private readonly evidenceByTaskId = new Map<number, Array<{ id: number; taskId: number; mediaUrl: string; checksum: string; geotag?: string; capturedAt: string; createdAt: string }>>();
+  private readonly portfolioPositionsById = new Map<number, { id: number; itemId: number; acquiredAt: string; acquisitionValueUsd?: number; currentStatus: PortfolioStatus; createdAt: string; updatedAt: string }>();
+  private readonly portfolioChecklistsByPositionId = new Map<number, Array<{ id: number; portfolioPositionId: number; checks: Record<string, boolean>; passed: boolean; outcomeStatus: "verified" | "failed" | "disputed"; createdByUserId: string; notes?: string; createdAt: string }>>();
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
@@ -40,6 +43,8 @@ class InMemoryAuthRepository implements AuthRepository {
   private offerIdSequence = 1;
   private taskIdSequence = 1;
   private evidenceIdSequence = 1;
+  private portfolioPositionSequence = 1;
+  private portfolioChecklistSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -233,6 +238,74 @@ class InMemoryAuthRepository implements AuthRepository {
 
   async listEvidenceByTaskId(taskId: number) {
     return this.evidenceByTaskId.get(taskId) ?? [];
+  }
+
+  async createPortfolioPosition(input: {
+    title: string;
+    category?: string;
+    condition?: string;
+    location?: string;
+    acquisitionValueUsd?: number;
+  }) {
+    const record = {
+      id: this.portfolioPositionSequence++,
+      itemId: this.itemIdSequence++,
+      acquiredAt: new Date().toISOString(),
+      acquisitionValueUsd: input.acquisitionValueUsd,
+      currentStatus: "seeded" as PortfolioStatus,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    this.portfolioPositionsById.set(record.id, record);
+    return record;
+  }
+
+  async getPortfolioPositionById(positionId: number) {
+    return this.portfolioPositionsById.get(positionId) ?? null;
+  }
+
+  async updatePortfolioPositionStatus(positionId: number, status: PortfolioStatus) {
+    const existing = this.portfolioPositionsById.get(positionId);
+
+    if (!existing) {
+      return null;
+    }
+
+    const updated = {
+      ...existing,
+      currentStatus: status,
+      updatedAt: new Date().toISOString()
+    };
+    this.portfolioPositionsById.set(positionId, updated);
+    return updated;
+  }
+
+  async createPortfolioVerificationChecklist(input: {
+    portfolioPositionId: number;
+    checks: Record<string, boolean>;
+    passed: boolean;
+    outcomeStatus: "verified" | "failed" | "disputed";
+    createdByUserId: string;
+    notes?: string;
+  }) {
+    const record = {
+      id: this.portfolioChecklistSequence++,
+      portfolioPositionId: input.portfolioPositionId,
+      checks: input.checks,
+      passed: input.passed,
+      outcomeStatus: input.outcomeStatus,
+      createdByUserId: input.createdByUserId,
+      notes: input.notes,
+      createdAt: new Date().toISOString()
+    };
+    const existing = this.portfolioChecklistsByPositionId.get(input.portfolioPositionId) ?? [];
+    existing.unshift(record);
+    this.portfolioChecklistsByPositionId.set(input.portfolioPositionId, existing);
+    return record;
+  }
+
+  async listPortfolioVerificationChecklists(portfolioPositionId: number) {
+    return this.portfolioChecklistsByPositionId.get(portfolioPositionId) ?? [];
   }
 }
 
@@ -701,6 +774,123 @@ describe("api auth and authorization", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("enforces portfolio position state transitions", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/portfolio/positions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Red paper clip",
+        category: "collectibles",
+        acquisitionValueUsd: 0.9
+      }
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${created.json().id}/transition`,
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        targetStatus: "verified"
+      }
+    });
+
+    const valid = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${created.json().id}/transition`,
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        targetStatus: "sourcing"
+      }
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(invalid.statusCode).toBe(409);
+    expect(valid.statusCode).toBe(200);
+    expect(valid.json().currentStatus).toBe("sourcing");
+  });
+
+  it("runs verification checklist and transitions to verified when checks pass", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/portfolio/positions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Red paper clip",
+        category: "collectibles"
+      }
+    });
+
+    const positionId = created.json().id;
+    const transitions = ["sourcing", "screened", "negotiating", "accepted_pending_verification"];
+
+    for (const targetStatus of transitions) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/portfolio/positions/${positionId}/transition`,
+        headers: { "x-api-key": "operator-key" },
+        payload: { targetStatus }
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const verify = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${positionId}/verification-checklist`,
+      headers: { "x-api-key": "reviewer-key" },
+      payload: {
+        identityConfirmed: true,
+        conditionConfirmed: true,
+        receiptProvided: true,
+        ownershipProofProvided: true
+      }
+    });
+
+    expect(verify.statusCode).toBe(200);
+    expect(verify.json().position.currentStatus).toBe("verified");
+    expect(verify.json().checklist.passed).toBe(true);
+  });
+
+  it("moves verification failures to disputed when requested", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/portfolio/positions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Trade candidate"
+      }
+    });
+
+    const positionId = created.json().id;
+    const transitions = ["sourcing", "screened", "negotiating", "accepted_pending_verification"];
+
+    for (const targetStatus of transitions) {
+      await app.inject({
+        method: "POST",
+        url: `/portfolio/positions/${positionId}/transition`,
+        headers: { "x-api-key": "operator-key" },
+        payload: { targetStatus }
+      });
+    }
+
+    const verify = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${positionId}/verification-checklist`,
+      headers: { "x-api-key": "reviewer-key" },
+      payload: {
+        identityConfirmed: false,
+        conditionConfirmed: true,
+        receiptProvided: false,
+        ownershipProofProvided: true,
+        disputed: true
+      }
+    });
+
+    expect(verify.statusCode).toBe(200);
+    expect(verify.json().position.currentStatus).toBe("disputed");
+    expect(verify.json().checklist.outcomeStatus).toBe("disputed");
   });
 
   it("rejects provider webhook with invalid token", async () => {

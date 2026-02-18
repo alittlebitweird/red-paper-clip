@@ -7,6 +7,7 @@ import {
   type AuthRepository,
   type AuthUser,
   type OfferStatus,
+  type PortfolioPositionRecord,
   type PolicyRuleInput,
   type TaskStatus,
   type UserRole,
@@ -14,6 +15,11 @@ import {
   PgAuthRepository
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
+import {
+  canTransitionPortfolioStatus,
+  isValidPortfolioStatus,
+  type PortfolioStatus
+} from "./portfolio-state-machine.js";
 import { rankCandidates } from "./scoring.js";
 import { RentAHumanStubProvider, type TaskProvider } from "./task-provider.js";
 import { computeValuation } from "./valuation.js";
@@ -91,6 +97,31 @@ type EvidenceCreateBody = {
   checksum?: string;
   geotag?: string;
   capturedAt?: string;
+};
+
+type PortfolioCreateBody = {
+  title?: string;
+  category?: string;
+  condition?: string;
+  location?: string;
+  acquisitionValueUsd?: number;
+};
+
+type PortfolioTransitionBody = {
+  targetStatus?: string;
+};
+
+type PortfolioVerificationBody = {
+  identityConfirmed?: boolean;
+  conditionConfirmed?: boolean;
+  receiptProvided?: boolean;
+  ownershipProofProvided?: boolean;
+  notes?: string;
+  disputed?: boolean;
+};
+
+type PortfolioParams = {
+  positionId: string;
 };
 
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
@@ -275,6 +306,68 @@ export const buildServer = (options: BuildServerOptions = {}) => {
     }
 
     return createHash("sha256").update(`${mediaUrl}|${capturedAt}`).digest("hex");
+  };
+
+  const parseVerificationChecks = (body: PortfolioVerificationBody) => {
+    const requiredChecks = {
+      identityConfirmed: body.identityConfirmed,
+      conditionConfirmed: body.conditionConfirmed,
+      receiptProvided: body.receiptProvided,
+      ownershipProofProvided: body.ownershipProofProvided
+    };
+
+    const hasMissing = Object.values(requiredChecks).some((value) => typeof value !== "boolean");
+
+    if (hasMissing) {
+      return {
+        valid: false as const,
+        error: "identityConfirmed, conditionConfirmed, receiptProvided, and ownershipProofProvided are required booleans"
+      };
+    }
+
+    const checks = {
+      identityConfirmed: requiredChecks.identityConfirmed as boolean,
+      conditionConfirmed: requiredChecks.conditionConfirmed as boolean,
+      receiptProvided: requiredChecks.receiptProvided as boolean,
+      ownershipProofProvided: requiredChecks.ownershipProofProvided as boolean
+    };
+
+    const passed = Object.values(checks).every((value) => value);
+
+    return { valid: true as const, checks, passed };
+  };
+
+  const transitionPortfolioPosition = async (
+    position: PortfolioPositionRecord,
+    targetStatus: PortfolioStatus,
+    actorUserId: number
+  ) => {
+    if (!canTransitionPortfolioStatus(position.currentStatus, targetStatus)) {
+      return {
+        ok: false as const,
+        statusCode: 409,
+        error: `Invalid transition from ${position.currentStatus} to ${targetStatus}`
+      };
+    }
+
+    const updated = await authRepository.updatePortfolioPositionStatus(position.id, targetStatus);
+
+    if (!updated) {
+      return { ok: false as const, statusCode: 404, error: "Portfolio position not found" };
+    }
+
+    await authRepository.writeEvent({
+      eventType: "portfolio.status_changed",
+      entityType: "portfolio_position",
+      entityId: String(updated.id),
+      payload: {
+        actorUserId,
+        from: position.currentStatus,
+        to: updated.currentStatus
+      }
+    });
+
+    return { ok: true as const, position: updated };
   };
 
   const changeOfferStatus = async (
@@ -841,6 +934,202 @@ export const buildServer = (options: BuildServerOptions = {}) => {
 
     return reply.status(200).send(task);
   });
+
+  app.post<{ Body: PortfolioCreateBody }>(
+    "/portfolio/positions",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const title = typeof request.body.title === "string" ? request.body.title.trim() : "";
+      const acquisitionValueUsd = request.body.acquisitionValueUsd;
+
+      if (!title) {
+        return reply.status(400).send({ error: "title is required" });
+      }
+
+      if (
+        acquisitionValueUsd !== undefined &&
+        (typeof acquisitionValueUsd !== "number" || !Number.isFinite(acquisitionValueUsd) || acquisitionValueUsd <= 0)
+      ) {
+        return reply.status(400).send({ error: "acquisitionValueUsd must be a positive number when provided" });
+      }
+
+      const position = await authRepository.createPortfolioPosition({
+        title,
+        category: request.body.category,
+        condition: request.body.condition,
+        location: request.body.location,
+        acquisitionValueUsd
+      });
+
+      await authRepository.writeEvent({
+        eventType: "portfolio.position_created",
+        entityType: "portfolio_position",
+        entityId: String(position.id),
+        payload: {
+          actorUserId: user.id,
+          status: position.currentStatus
+        }
+      });
+
+      return reply.status(201).send(position);
+    }
+  );
+
+  app.get<{ Params: PortfolioParams }>(
+    "/portfolio/positions/:positionId",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const positionId = parsePositiveId(request.params.positionId);
+
+      if (!positionId) {
+        return reply.status(400).send({ error: "Invalid positionId" });
+      }
+
+      const position = await authRepository.getPortfolioPositionById(positionId);
+
+      if (!position) {
+        return reply.status(404).send({ error: "Portfolio position not found" });
+      }
+
+      return reply.status(200).send(position);
+    }
+  );
+
+  app.post<{ Params: PortfolioParams; Body: PortfolioTransitionBody }>(
+    "/portfolio/positions/:positionId/transition",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const positionId = parsePositiveId(request.params.positionId);
+      const targetStatusRaw = request.body.targetStatus;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!positionId) {
+        return reply.status(400).send({ error: "Invalid positionId" });
+      }
+
+      if (typeof targetStatusRaw !== "string" || !isValidPortfolioStatus(targetStatusRaw)) {
+        return reply.status(400).send({ error: "targetStatus must be a valid portfolio status" });
+      }
+
+      const position = await authRepository.getPortfolioPositionById(positionId);
+
+      if (!position) {
+        return reply.status(404).send({ error: "Portfolio position not found" });
+      }
+
+      const result = await transitionPortfolioPosition(position, targetStatusRaw, user.id);
+
+      if (!result.ok) {
+        return reply.status(result.statusCode).send({ error: result.error });
+      }
+
+      return reply.status(200).send(result.position);
+    }
+  );
+
+  app.post<{ Params: PortfolioParams; Body: PortfolioVerificationBody }>(
+    "/portfolio/positions/:positionId/verification-checklist",
+    { preHandler: requireRole(["admin", "reviewer"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const positionId = parsePositiveId(request.params.positionId);
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!positionId) {
+        return reply.status(400).send({ error: "Invalid positionId" });
+      }
+
+      const position = await authRepository.getPortfolioPositionById(positionId);
+
+      if (!position) {
+        return reply.status(404).send({ error: "Portfolio position not found" });
+      }
+
+      if (position.currentStatus !== "accepted_pending_verification") {
+        return reply.status(409).send({
+          error: "Position must be in accepted_pending_verification before running checklist"
+        });
+      }
+
+      const parsedChecks = parseVerificationChecks(request.body);
+
+      if (!parsedChecks.valid) {
+        return reply.status(400).send({ error: parsedChecks.error });
+      }
+
+      const outcomeStatus: PortfolioStatus = parsedChecks.passed
+        ? "verified"
+        : request.body.disputed
+          ? "disputed"
+          : "failed";
+
+      const checklist = await authRepository.createPortfolioVerificationChecklist({
+        portfolioPositionId: position.id,
+        checks: parsedChecks.checks,
+        passed: parsedChecks.passed,
+        outcomeStatus: outcomeStatus === "verified" ? "verified" : outcomeStatus === "disputed" ? "disputed" : "failed",
+        createdByUserId: String(user.id),
+        notes: typeof request.body.notes === "string" ? request.body.notes.trim() : undefined
+      });
+
+      const transitioned = await transitionPortfolioPosition(position, outcomeStatus, user.id);
+
+      if (!transitioned.ok) {
+        return reply.status(transitioned.statusCode).send({ error: transitioned.error });
+      }
+
+      await authRepository.writeEvent({
+        eventType: "portfolio.verification_recorded",
+        entityType: "portfolio_position",
+        entityId: String(position.id),
+        payload: {
+          actorUserId: user.id,
+          checklistId: checklist.id,
+          passed: checklist.passed,
+          outcomeStatus: checklist.outcomeStatus
+        }
+      });
+
+      return reply.status(200).send({
+        checklist,
+        position: transitioned.position
+      });
+    }
+  );
+
+  app.get<{ Params: PortfolioParams }>(
+    "/portfolio/positions/:positionId/verification-checklist",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const positionId = parsePositiveId(request.params.positionId);
+
+      if (!positionId) {
+        return reply.status(400).send({ error: "Invalid positionId" });
+      }
+
+      const position = await authRepository.getPortfolioPositionById(positionId);
+
+      if (!position) {
+        return reply.status(404).send({ error: "Portfolio position not found" });
+      }
+
+      const checklists = await authRepository.listPortfolioVerificationChecklists(positionId);
+      return reply.status(200).send({ checklists });
+    }
+  );
 
   app.addHook("onClose", async () => {
     if (authRepository.close) {
