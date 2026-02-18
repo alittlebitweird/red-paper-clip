@@ -17,6 +17,8 @@
 - Implemented `RPC-004`: opportunity intake validation, duplicate detection, and normalization (`7392acf`).
 - Updated local trackers for `RPC-004` completion (`83d7542`).
 - Implemented `RPC-005`: manual intake/review UI and API opportunity list endpoint (`18d10b6`).
+- Updated local trackers for `RPC-005` completion (`6f5b6d7`).
+- Implemented `RPC-006`: valuation engine, confidence scoring, and versioned persistence (`ee3e8ee`).
 
 ## Log Format
 - Date

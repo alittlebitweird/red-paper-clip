@@ -8,7 +8,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-003 Auth and roles
 - [x] RPC-004 Opportunity intake API
 - [x] RPC-005 Manual ops UI for intake and review
-- [ ] RPC-006 Valuation service v1
+- [x] RPC-006 Valuation service v1
 - [ ] RPC-007 Scoring engine v1
 
 ## Milestone 2: Execution and Compliance (Week 2)
