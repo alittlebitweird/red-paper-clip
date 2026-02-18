@@ -14,7 +14,7 @@ Project codename: kilo-mcclain-clawdbot
 ## Milestone 2: Execution and Compliance (Week 2)
 - [x] RPC-008 Policy guard middleware
 - [x] RPC-009 Offer workflow and approval queue
-- [ ] RPC-010 Human execution adapter (RentAHuman interface)
+- [x] RPC-010 Human execution adapter (RentAHuman interface)
 - [ ] RPC-011 Evidence capture pipeline
 - [ ] RPC-012 Verification checklist
 - [ ] RPC-013 Portfolio state machine

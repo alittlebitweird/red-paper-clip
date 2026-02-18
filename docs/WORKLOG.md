@@ -25,6 +25,8 @@
 - Implemented `RPC-008`: policy guard middleware for outbound actions (`7e84085`).
 - Updated local trackers for `RPC-008` completion (`809f217`).
 - Implemented `RPC-009`: draft/approve/reject/send offer workflow with state transitions (`a52dfbd`).
+- Updated local trackers for `RPC-009` completion (`7fa9445`).
+- Implemented `RPC-010`: task-provider adapter and webhook status updates (`f4f4994`).
 
 ## Log Format
 - Date
