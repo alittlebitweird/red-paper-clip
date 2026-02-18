@@ -13,6 +13,8 @@
 - Implemented `RPC-002`: reversible SQL migrations, migration runner, and seed script in `packages/db` (`df90254`).
 - Documented DB commands and marked `RPC-002` complete (`ba5e704`).
 - Implemented `RPC-003`: role-based auth routes, protected actions, and audit logging (`8e3898d`).
+- Updated local trackers for `RPC-003` completion (`b122c94`).
+- Implemented `RPC-004`: opportunity intake validation, duplicate detection, and normalization (`7392acf`).
 
 ## Log Format
 - Date

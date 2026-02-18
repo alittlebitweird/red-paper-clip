@@ -6,7 +6,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-001 Repo bootstrap and CI
 - [x] RPC-002 Database schema and migrations
 - [x] RPC-003 Auth and roles
-- [ ] RPC-004 Opportunity intake API
+- [x] RPC-004 Opportunity intake API
 - [ ] RPC-005 Manual ops UI for intake and review
 - [ ] RPC-006 Valuation service v1
 - [ ] RPC-007 Scoring engine v1
