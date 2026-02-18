@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "concurrently -k -n api,web,worker -c green,blue,magenta \"npm run dev -w @rpc/api\" \"npm run dev -w @rpc/web\" \"npm run dev -w @rpc/worker\"",
