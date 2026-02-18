@@ -37,6 +37,8 @@
 - Implemented `RPC-015`: deterministic simulation and smoke-test workflow (`507fd9f`).
 - Updated trackers for `RPC-015` completion (`8f53278`).
 - Implemented `RPC-016`: source-backed research brief for RentAHuman execution strategy and policy-safe marketplace operations.
+- Updated trackers and backlog for `RPC-016` completion (`a44f585`).
+- Implemented `RPC-017`: automated end-to-end API proof for `seeded -> completed` workflow.
 
 ## Log Format
 - Date

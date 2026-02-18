@@ -914,6 +914,69 @@ describe("api auth and authorization", () => {
     expect(verify.json().checklist.passed).toBe(true);
   });
 
+  it("completes a seeded position through the full portfolio workflow", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/portfolio/positions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Seed red paper clip",
+        category: "collectibles",
+        acquisitionValueUsd: 0.9
+      }
+    });
+
+    const positionId = created.json().id;
+    const transitions = ["sourcing", "screened", "negotiating", "accepted_pending_verification"] as const;
+
+    for (const targetStatus of transitions) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/portfolio/positions/${positionId}/transition`,
+        headers: { "x-api-key": "operator-key" },
+        payload: { targetStatus }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().currentStatus).toBe(targetStatus);
+    }
+
+    const verify = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${positionId}/verification-checklist`,
+      headers: { "x-api-key": "reviewer-key" },
+      payload: {
+        identityConfirmed: true,
+        conditionConfirmed: true,
+        receiptProvided: true,
+        ownershipProofProvided: true
+      }
+    });
+
+    expect(verify.statusCode).toBe(200);
+    expect(verify.json().position.currentStatus).toBe("verified");
+
+    const complete = await app.inject({
+      method: "POST",
+      url: `/portfolio/positions/${positionId}/transition`,
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        targetStatus: "completed"
+      }
+    });
+
+    const current = await app.inject({
+      method: "GET",
+      url: `/portfolio/positions/${positionId}`,
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json().currentStatus).toBe("completed");
+    expect(current.statusCode).toBe(200);
+    expect(current.json().currentStatus).toBe("completed");
+  });
+
   it("moves verification failures to disputed when requested", async () => {
     const created = await app.inject({
       method: "POST",

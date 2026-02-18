@@ -3,7 +3,7 @@
 Project codename: kilo-mcclain-clawdbot
 
 ## Current Phase
-Implementation complete for `RPC-001` through `RPC-016`.
+Implementation complete for `RPC-001` through `RPC-017`.
 
 ## Tracking Files
 - `docs/MVP-SPEC.md` for architecture and success metrics
@@ -11,4 +11,4 @@ Implementation complete for `RPC-001` through `RPC-016`.
 - `docs/WORKLOG.md` for chronological progress
 
 ## Next Implementation Tickets
-- Complete MVP Definition of Done by proving seeded item reaches `completed` through full workflow.
+- None. MVP backlog and definition of done are now complete.
