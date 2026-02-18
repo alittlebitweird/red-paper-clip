@@ -88,6 +88,22 @@ export type PolicyRuleRecord = {
   reason: string;
 };
 
+export type OpportunitySummary = {
+  id: number;
+  status: string;
+};
+
+export type OfferStatus = "draft" | "approved" | "rejected" | "sent";
+
+export type OfferRecord = {
+  id: number;
+  opportunityId: number;
+  status: OfferStatus;
+  offerTerms: Record<string, unknown>;
+  sentByHumanId?: string;
+  updatedAt: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -98,6 +114,10 @@ export interface AuthRepository {
   recordValuation(input: RecordValuationInput): Promise<ValuationRecord>;
   listScoringCandidates(limit: number): Promise<ScoringCandidateRecord[]>;
   getPolicyRule(platform: string, action: string): Promise<PolicyRuleRecord | null>;
+  getOpportunityById(id: number): Promise<OpportunitySummary | null>;
+  createOfferDraft(opportunityId: number, offerTerms: Record<string, unknown>): Promise<OfferRecord>;
+  getOfferById(offerId: number): Promise<OfferRecord | null>;
+  updateOfferStatus(offerId: number, status: OfferStatus, sentByHumanId?: string): Promise<OfferRecord>;
   close?: () => Promise<void>;
 }
 
@@ -397,6 +417,122 @@ export class PgAuthRepository implements AuthRepository {
     }
 
     return result.rows[0];
+  }
+
+  async getOpportunityById(id: number): Promise<OpportunitySummary | null> {
+    const result = await this.pool.query<{ id: number; status: string }>(
+      `
+      SELECT id, status
+      FROM opportunities
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    return result.rows[0];
+  }
+
+  async createOfferDraft(opportunityId: number, offerTerms: Record<string, unknown>): Promise<OfferRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      opportunity_id: number;
+      status: OfferStatus;
+      offer_terms: Record<string, unknown>;
+      sent_by_human_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      INSERT INTO offers (opportunity_id, offer_terms, status)
+      VALUES ($1, $2::jsonb, 'draft')
+      RETURNING id, opportunity_id, status, offer_terms, sent_by_human_id, updated_at
+      `,
+      [opportunityId, JSON.stringify(offerTerms)]
+    );
+
+    const row = result.rows[0];
+
+    return {
+      id: row.id,
+      opportunityId: row.opportunity_id,
+      status: row.status,
+      offerTerms: row.offer_terms,
+      sentByHumanId: row.sent_by_human_id ?? undefined,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async getOfferById(offerId: number): Promise<OfferRecord | null> {
+    const result = await this.pool.query<{
+      id: number;
+      opportunity_id: number;
+      status: OfferStatus;
+      offer_terms: Record<string, unknown>;
+      sent_by_human_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      SELECT id, opportunity_id, status, offer_terms, sent_by_human_id, updated_at
+      FROM offers
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [offerId]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      opportunityId: row.opportunity_id,
+      status: row.status,
+      offerTerms: row.offer_terms,
+      sentByHumanId: row.sent_by_human_id ?? undefined,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async updateOfferStatus(offerId: number, status: OfferStatus, sentByHumanId?: string): Promise<OfferRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      opportunity_id: number;
+      status: OfferStatus;
+      offer_terms: Record<string, unknown>;
+      sent_by_human_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      UPDATE offers
+      SET
+        status = $2,
+        sent_by_human_id = COALESCE($3, sent_by_human_id),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, opportunity_id, status, offer_terms, sent_by_human_id, updated_at
+      `,
+      [offerId, status, sentByHumanId ?? null]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      throw new Error(`Offer ${offerId} not found`);
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      opportunityId: row.opportunity_id,
+      status: row.status,
+      offerTerms: row.offer_terms,
+      sentByHumanId: row.sent_by_human_id ?? undefined,
+      updatedAt: row.updated_at
+    };
   }
 
   async close(): Promise<void> {

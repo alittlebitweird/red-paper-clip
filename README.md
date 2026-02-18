@@ -72,3 +72,10 @@ npm run db:migrate:down -w @rpc/db
 - `POST /outbound/actions` (roles: `admin`, `operator`)
 - Evaluates platform/action against `policy_rules`
 - Blocks disallowed actions with `policyCode` and logs policy decisions
+
+## Offer Workflow API
+- `POST /offers/draft` (roles: `admin`, `operator`)
+- `POST /offers/:offerId/approve` (roles: `admin`, `reviewer`)
+- `POST /offers/:offerId/reject` (roles: `admin`, `reviewer`)
+- `POST /offers/:offerId/send` (roles: `admin`, `operator`)
+- `GET /offers/:offerId` (roles: `admin`, `operator`, `reviewer`)

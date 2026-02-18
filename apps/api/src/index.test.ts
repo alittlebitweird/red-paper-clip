@@ -14,11 +14,13 @@ import { buildServer } from "./index.js";
 class InMemoryAuthRepository implements AuthRepository {
   private readonly usersByHash = new Map<string, AuthUser>();
   private readonly opportunitiesByDedupeKey = new Map<string, OpportunityRecord>();
+  private readonly offersById = new Map<number, { id: number; opportunityId: number; status: "draft" | "approved" | "rejected" | "sent"; offerTerms: Record<string, unknown>; sentByHumanId?: string; updatedAt: string }>();
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
   private itemIdSequence = 1;
   private valuationIdSequence = 1;
+  private offerIdSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -94,6 +96,54 @@ class InMemoryAuthRepository implements AuthRepository {
         category: opportunity.category
       }))
       .slice(0, limit);
+  }
+
+  async getOpportunityById(id: number) {
+    const opportunity = Array.from(this.opportunitiesByDedupeKey.values()).find((item) => item.id === id);
+    if (!opportunity) {
+      return null;
+    }
+
+    return {
+      id: opportunity.id,
+      status: opportunity.status
+    };
+  }
+
+  async createOfferDraft(opportunityId: number, offerTerms: Record<string, unknown>) {
+    const offer = {
+      id: this.offerIdSequence++,
+      opportunityId,
+      status: "draft" as const,
+      offerTerms,
+      updatedAt: new Date().toISOString()
+    };
+    this.offersById.set(offer.id, offer);
+    return offer;
+  }
+
+  async getOfferById(offerId: number) {
+    return this.offersById.get(offerId) ?? null;
+  }
+
+  async updateOfferStatus(
+    offerId: number,
+    status: "draft" | "approved" | "rejected" | "sent",
+    sentByHumanId?: string
+  ) {
+    const offer = this.offersById.get(offerId);
+    if (!offer) {
+      throw new Error("Offer not found");
+    }
+
+    const updated = {
+      ...offer,
+      status,
+      sentByHumanId: sentByHumanId ?? offer.sentByHumanId,
+      updatedAt: new Date().toISOString()
+    };
+    this.offersById.set(offerId, updated);
+    return updated;
   }
 }
 
@@ -396,5 +446,87 @@ describe("api auth and authorization", () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json().allowed).toBe(true);
+  });
+
+  it("tracks offer workflow from draft to sent", async () => {
+    const opportunity = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "Craigslist",
+        category: "Electronics",
+        location: "San Francisco, CA",
+        title: "Nintendo Switch",
+        priceUsd: 250
+      }
+    });
+
+    const draft = await app.inject({
+      method: "POST",
+      url: "/offers/draft",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        opportunityId: opportunity.json().id,
+        offerTerms: { requestedItem: "MacBook Air", cashDeltaUsd: 0 }
+      }
+    });
+
+    const approved = await app.inject({
+      method: "POST",
+      url: `/offers/${draft.json().id}/approve`,
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    const sent = await app.inject({
+      method: "POST",
+      url: `/offers/${draft.json().id}/send`,
+      headers: { "x-api-key": "operator-key" }
+    });
+
+    expect(draft.statusCode).toBe(201);
+    expect(approved.statusCode).toBe(200);
+    expect(sent.statusCode).toBe(200);
+    expect(sent.json().status).toBe("sent");
+  });
+
+  it("rejects invalid offer transitions", async () => {
+    const opportunity = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "Craigslist",
+        category: "Electronics",
+        location: "San Francisco, CA",
+        title: "Nintendo Switch",
+        priceUsd: 250
+      }
+    });
+
+    const draft = await app.inject({
+      method: "POST",
+      url: "/offers/draft",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        opportunityId: opportunity.json().id,
+        offerTerms: { requestedItem: "MacBook Air", cashDeltaUsd: 0 }
+      }
+    });
+
+    await app.inject({
+      method: "POST",
+      url: `/offers/${draft.json().id}/reject`,
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: `/offers/${draft.json().id}/approve`,
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(invalid.statusCode).toBe(409);
+    expect(invalid.json().error).toContain("Invalid transition");
   });
 });

@@ -5,6 +5,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   type AuthRepository,
   type AuthUser,
+  type OfferStatus,
   type PolicyRuleInput,
   type UserRole,
   type ValuationCompInput,
@@ -55,6 +56,15 @@ type OutboundActionBody = {
   platform?: string;
   action?: string;
   payload?: Record<string, unknown>;
+};
+
+type OfferDraftBody = {
+  opportunityId?: number;
+  offerTerms?: Record<string, unknown>;
+};
+
+type OfferParams = {
+  offerId: string;
 };
 
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
@@ -159,6 +169,12 @@ const getDefaultAuthRepository = () => {
 export const buildServer = (options: BuildServerOptions = {}) => {
   const app = Fastify({ logger: true });
   const authRepository = options.authRepository ?? getDefaultAuthRepository();
+  const allowedOfferTransitions: Record<OfferStatus, OfferStatus[]> = {
+    draft: ["approved", "rejected"],
+    approved: ["sent", "rejected"],
+    rejected: [],
+    sent: []
+  };
 
   const evaluatePolicy = async (
     platform: string,
@@ -213,6 +229,54 @@ export const buildServer = (options: BuildServerOptions = {}) => {
 
       request.authUser = user;
     };
+  };
+
+  const parsePositiveId = (rawValue: string) => {
+    const parsed = Number(rawValue);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return null;
+    }
+
+    return parsed;
+  };
+
+  const changeOfferStatus = async (
+    offerId: number,
+    targetStatus: OfferStatus,
+    actorUserId: number
+  ) => {
+    const existing = await authRepository.getOfferById(offerId);
+
+    if (!existing) {
+      return { ok: false as const, statusCode: 404, error: "Offer not found" };
+    }
+
+    if (!allowedOfferTransitions[existing.status].includes(targetStatus)) {
+      return {
+        ok: false as const,
+        statusCode: 409,
+        error: `Invalid transition from ${existing.status} to ${targetStatus}`
+      };
+    }
+
+    const updated = await authRepository.updateOfferStatus(
+      offerId,
+      targetStatus,
+      targetStatus === "sent" ? String(actorUserId) : undefined
+    );
+
+    await authRepository.writeEvent({
+      eventType: "offer.status_changed",
+      entityType: "offer",
+      entityId: String(updated.id),
+      payload: {
+        from: existing.status,
+        to: targetStatus,
+        actorUserId
+      }
+    });
+
+    return { ok: true as const, offer: updated };
   };
 
   app.get("/health", async () => {
@@ -443,6 +507,139 @@ export const buildServer = (options: BuildServerOptions = {}) => {
         policyCode: decision.policyCode,
         status: "queued"
       });
+    }
+  );
+
+  app.post<{ Body: OfferDraftBody }>(
+    "/offers/draft",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const opportunityId = request.body.opportunityId;
+      const offerTerms = request.body.offerTerms;
+
+      if (typeof opportunityId !== "number" || opportunityId <= 0 || !offerTerms || typeof offerTerms !== "object") {
+        return reply.status(400).send({ error: "opportunityId and offerTerms are required" });
+      }
+
+      const opportunity = await authRepository.getOpportunityById(opportunityId);
+
+      if (!opportunity) {
+        return reply.status(404).send({ error: "Opportunity not found" });
+      }
+
+      const offer = await authRepository.createOfferDraft(opportunityId, offerTerms);
+      await authRepository.writeEvent({
+        eventType: "offer.created",
+        entityType: "offer",
+        entityId: String(offer.id),
+        payload: {
+          actorUserId: user.id,
+          status: offer.status
+        }
+      });
+
+      return reply.status(201).send(offer);
+    }
+  );
+
+  app.get<{ Params: OfferParams }>(
+    "/offers/:offerId",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const offerId = parsePositiveId(request.params.offerId);
+
+      if (!offerId) {
+        return reply.status(400).send({ error: "Invalid offerId" });
+      }
+
+      const offer = await authRepository.getOfferById(offerId);
+
+      if (!offer) {
+        return reply.status(404).send({ error: "Offer not found" });
+      }
+
+      return reply.status(200).send(offer);
+    }
+  );
+
+  app.post<{ Params: OfferParams }>(
+    "/offers/:offerId/approve",
+    { preHandler: requireRole(["admin", "reviewer"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const offerId = parsePositiveId(request.params.offerId);
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!offerId) {
+        return reply.status(400).send({ error: "Invalid offerId" });
+      }
+
+      const result = await changeOfferStatus(offerId, "approved", user.id);
+
+      if (!result.ok) {
+        return reply.status(result.statusCode).send({ error: result.error });
+      }
+
+      return reply.status(200).send(result.offer);
+    }
+  );
+
+  app.post<{ Params: OfferParams }>(
+    "/offers/:offerId/reject",
+    { preHandler: requireRole(["admin", "reviewer"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const offerId = parsePositiveId(request.params.offerId);
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!offerId) {
+        return reply.status(400).send({ error: "Invalid offerId" });
+      }
+
+      const result = await changeOfferStatus(offerId, "rejected", user.id);
+
+      if (!result.ok) {
+        return reply.status(result.statusCode).send({ error: result.error });
+      }
+
+      return reply.status(200).send(result.offer);
+    }
+  );
+
+  app.post<{ Params: OfferParams }>(
+    "/offers/:offerId/send",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const offerId = parsePositiveId(request.params.offerId);
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!offerId) {
+        return reply.status(400).send({ error: "Invalid offerId" });
+      }
+
+      const result = await changeOfferStatus(offerId, "sent", user.id);
+
+      if (!result.ok) {
+        return reply.status(result.statusCode).send({ error: result.error });
+      }
+
+      return reply.status(200).send(result.offer);
     }
   );
 
