@@ -90,6 +90,11 @@ export type PolicyRuleRecord = {
   reason: string;
 };
 
+export type PolicyRuleListOptions = {
+  platform?: string;
+  limit?: number;
+};
+
 export type OpportunitySummary = {
   id: number;
   status: string;
@@ -172,6 +177,7 @@ export interface AuthRepository {
   recordValuation(input: RecordValuationInput): Promise<ValuationRecord>;
   listScoringCandidates(limit: number): Promise<ScoringCandidateRecord[]>;
   getPolicyRule(platform: string, action: string): Promise<PolicyRuleRecord | null>;
+  listPolicyRules(options: PolicyRuleListOptions): Promise<PolicyRuleRecord[]>;
   getOpportunityById(id: number): Promise<OpportunitySummary | null>;
   createOfferDraft(opportunityId: number, offerTerms: Record<string, unknown>): Promise<OfferRecord>;
   getOfferById(offerId: number): Promise<OfferRecord | null>;
@@ -518,6 +524,34 @@ export class PgAuthRepository implements AuthRepository {
     }
 
     return result.rows[0];
+  }
+
+  async listPolicyRules(options: PolicyRuleListOptions): Promise<PolicyRuleRecord[]> {
+    const platform = options.platform?.trim().toLowerCase();
+    const limit = Math.max(1, Math.min(options.limit ?? 200, 500));
+
+    const result = platform
+      ? await this.pool.query<PolicyRuleRecord>(
+          `
+          SELECT platform, action, allowed, reason
+          FROM policy_rules
+          WHERE platform = $1
+          ORDER BY platform ASC, action ASC
+          LIMIT $2
+          `,
+          [platform, limit]
+        )
+      : await this.pool.query<PolicyRuleRecord>(
+          `
+          SELECT platform, action, allowed, reason
+          FROM policy_rules
+          ORDER BY platform ASC, action ASC
+          LIMIT $1
+          `,
+          [limit]
+        );
+
+    return result.rows;
   }
 
   async getOpportunityById(id: number): Promise<OpportunitySummary | null> {

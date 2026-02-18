@@ -29,6 +29,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-018 Configurable task provider factory with RentAHuman API adapter and tests
 - [x] RPC-019 Task dispatch reliability with controlled provider failure handling
 - [x] RPC-020 Expanded default policy seed pack for marketplace-safe operations
+- [x] RPC-021 Policy rule visibility endpoint for ops and reviewer roles
 
 ## MVP Definition of Done
 - [x] Seed item reaches `completed` state through full workflow

@@ -133,6 +133,11 @@ type DashboardSnapshotBody = {
   seedCostUsd?: number;
 };
 
+type PolicyRuleListQuery = {
+  platform?: string;
+  limit?: number;
+};
+
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
 
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -458,6 +463,26 @@ export const buildServer = (options: BuildServerOptions = {}) => {
   app.get("/auth/me", { preHandler: requireRole(["admin", "operator", "reviewer"]) }, async (request) => {
     return request.authUser;
   });
+
+  app.get<{ Querystring: PolicyRuleListQuery }>(
+    "/admin/policy-rules",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const platform =
+        typeof request.query.platform === "string" && request.query.platform.trim().length > 0
+          ? normalizeText(request.query.platform)
+          : undefined;
+      const limitRaw = request.query.limit;
+      const limit = typeof limitRaw === "number" ? limitRaw : typeof limitRaw === "string" ? Number(limitRaw) : 200;
+
+      if (!Number.isFinite(limit) || limit <= 0) {
+        return reply.status(400).send({ error: "limit must be a positive number" });
+      }
+
+      const rules = await authRepository.listPolicyRules({ platform, limit: Math.floor(limit) });
+      return reply.status(200).send({ rules });
+    }
+  );
 
   app.post<{ Body: PolicyRuleInput }>(
     "/admin/policy-rules",

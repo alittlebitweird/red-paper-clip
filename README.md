@@ -71,6 +71,7 @@ npm run db:migrate:down -w @rpc/db
 - Ranks current opportunities using weighted trade-score formula
 
 ## Policy Guard API
+- `GET /admin/policy-rules` lists current policy rules (`admin`, `operator`, `reviewer`)
 - `POST /outbound/actions` (roles: `admin`, `operator`)
 - Evaluates platform/action against `policy_rules`
 - Blocks disallowed actions with `policyCode` and logs policy decisions

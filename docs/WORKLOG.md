@@ -45,6 +45,8 @@
 - Implemented `RPC-019`: controlled task-provider failure handling with `502` response and audit event.
 - Updated trackers for `RPC-019` completion (`f1309b7`).
 - Implemented `RPC-020`: expanded default marketplace policy seed rules for safer outbound actions.
+- Updated trackers for `RPC-020` completion (`f63b616`).
+- Implemented `RPC-021`: policy rule listing endpoint with filter/limit support and API tests.
 
 ## Log Format
 - Date

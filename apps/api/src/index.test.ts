@@ -74,6 +74,21 @@ class InMemoryAuthRepository implements AuthRepository {
     return this.policyRules.find((rule) => rule.platform === platform && rule.action === action) ?? null;
   }
 
+  async listPolicyRules(options: { platform?: string; limit?: number }) {
+    const platform = options.platform?.trim().toLowerCase();
+    const limit = Math.max(1, Math.min(options.limit ?? 200, 500));
+    const rules = this.policyRules
+      .filter((rule) => (platform ? rule.platform === platform : true))
+      .sort((a, b) => {
+        if (a.platform === b.platform) {
+          return a.action.localeCompare(b.action);
+        }
+        return a.platform.localeCompare(b.platform);
+      });
+
+    return rules.slice(0, limit);
+  }
+
   async findOpportunityByDedupeKey(dedupeKey: string): Promise<OpportunityRecord | null> {
     return this.opportunitiesByDedupeKey.get(dedupeKey) ?? null;
   }
@@ -465,6 +480,63 @@ describe("api auth and authorization", () => {
         entityId: "etsy:off_platform_transaction"
       })
     );
+  });
+
+  it("lists policy rules for authorized roles with optional platform filter", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/admin/policy-rules",
+      headers: { "x-api-key": "admin-key" },
+      payload: {
+        platform: "ebay",
+        action: "off_platform_transaction",
+        allowed: false,
+        reason: "forbidden"
+      }
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/admin/policy-rules",
+      headers: { "x-api-key": "admin-key" },
+      payload: {
+        platform: "craigslist",
+        action: "automated_posting",
+        allowed: false,
+        reason: "forbidden"
+      }
+    });
+
+    const allRules = await app.inject({
+      method: "GET",
+      url: "/admin/policy-rules?limit=10",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    const ebayOnly = await app.inject({
+      method: "GET",
+      url: "/admin/policy-rules?platform=ebay&limit=10",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(allRules.statusCode).toBe(200);
+    expect(allRules.json().rules.length).toBeGreaterThanOrEqual(2);
+    expect(ebayOnly.statusCode).toBe(200);
+    expect(ebayOnly.json().rules).toEqual(
+      expect.arrayContaining([expect.objectContaining({ platform: "ebay", action: "off_platform_transaction" })])
+    );
+    expect(ebayOnly.json().rules).toHaveLength(1);
+  });
+
+  it("validates policy rule list query params", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/admin/policy-rules?limit=0",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("limit must be a positive number");
   });
 
   it("creates normalized opportunities for operator users", async () => {
