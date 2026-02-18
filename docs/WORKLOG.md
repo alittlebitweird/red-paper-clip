@@ -33,6 +33,8 @@
 - Implemented `RPC-012` and `RPC-013`: verification checklist workflow and portfolio state machine (`6657ea4`).
 - Updated local trackers for `RPC-012` and `RPC-013` completion (`d2851b0`).
 - Implemented `RPC-014`: KPI dashboard endpoints and daily snapshot worker job (`9b10302`).
+- Updated local trackers for `RPC-014` completion (`09c4466`).
+- Implemented `RPC-015`: deterministic simulation and smoke-test workflow (`507fd9f`).
 
 ## Log Format
 - Date

@@ -21,10 +21,10 @@ Project codename: kilo-mcclain-clawdbot
 
 ## Milestone 3: Visibility and Readiness
 - [x] RPC-014 KPI dashboard
-- [ ] RPC-015 Simulation and smoke tests
+- [x] RPC-015 Simulation and smoke tests
 
 ## MVP Definition of Done
 - [ ] Seed item reaches `completed` state through full workflow
-- [ ] Every decision and action is audit-logged
-- [ ] Policy guard blocks disallowed actions by rule
-- [ ] Dashboard updates daily with live pipeline data
+- [x] Every decision and action is audit-logged
+- [x] Policy guard blocks disallowed actions by rule
+- [x] Dashboard updates daily with live pipeline data
