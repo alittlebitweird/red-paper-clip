@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { createHash } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
 import {
@@ -79,6 +80,17 @@ type TaskCreateBody = {
 type TaskWebhookBody = {
   providerTaskId?: string;
   status?: TaskStatus;
+};
+
+type TaskParams = {
+  taskId: string;
+};
+
+type EvidenceCreateBody = {
+  mediaUrl?: string;
+  checksum?: string;
+  geotag?: string;
+  capturedAt?: string;
 };
 
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
@@ -255,6 +267,14 @@ export const buildServer = (options: BuildServerOptions = {}) => {
     }
 
     return parsed;
+  };
+
+  const resolveEvidenceChecksum = (mediaUrl: string, capturedAt: string, providedChecksum?: string) => {
+    if (providedChecksum && providedChecksum.trim().length > 0) {
+      return providedChecksum.trim().toLowerCase();
+    }
+
+    return createHash("sha256").update(`${mediaUrl}|${capturedAt}`).digest("hex");
   };
 
   const changeOfferStatus = async (
@@ -701,6 +721,85 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       });
 
       return reply.status(201).send(task);
+    }
+  );
+
+  app.post<{ Params: TaskParams; Body: EvidenceCreateBody }>(
+    "/tasks/:taskId/evidence",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const taskId = parsePositiveId(request.params.taskId);
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!taskId) {
+        return reply.status(400).send({ error: "Invalid taskId" });
+      }
+
+      const task = await authRepository.getTaskById(taskId);
+
+      if (!task) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+
+      const mediaUrl = typeof request.body.mediaUrl === "string" ? request.body.mediaUrl.trim() : "";
+      const geotag = typeof request.body.geotag === "string" ? request.body.geotag.trim() : undefined;
+      const capturedAtRaw =
+        typeof request.body.capturedAt === "string" ? request.body.capturedAt : new Date().toISOString();
+
+      if (!mediaUrl) {
+        return reply.status(400).send({ error: "mediaUrl is required" });
+      }
+
+      if (Number.isNaN(new Date(capturedAtRaw).getTime())) {
+        return reply.status(400).send({ error: "capturedAt must be a valid ISO datetime" });
+      }
+
+      const checksum = resolveEvidenceChecksum(mediaUrl, capturedAtRaw, request.body.checksum);
+      const evidence = await authRepository.createEvidenceRecord({
+        taskId,
+        mediaUrl,
+        checksum,
+        geotag,
+        capturedAt: capturedAtRaw
+      });
+
+      await authRepository.writeEvent({
+        eventType: "evidence.recorded",
+        entityType: "task",
+        entityId: String(taskId),
+        payload: {
+          actorUserId: user.id,
+          evidenceId: evidence.id,
+          checksum: evidence.checksum
+        }
+      });
+
+      return reply.status(201).send(evidence);
+    }
+  );
+
+  app.get<{ Params: TaskParams }>(
+    "/tasks/:taskId/evidence",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const taskId = parsePositiveId(request.params.taskId);
+
+      if (!taskId) {
+        return reply.status(400).send({ error: "Invalid taskId" });
+      }
+
+      const task = await authRepository.getTaskById(taskId);
+
+      if (!task) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+
+      const evidence = await authRepository.listEvidenceByTaskId(taskId);
+      return reply.status(200).send({ evidence });
     }
   );
 

@@ -84,3 +84,5 @@ npm run db:migrate:down -w @rpc/db
 - `POST /tasks` (roles: `admin`, `operator`)
 - Dispatches `inspect/pickup/meet/ship` through provider adapter (`rentahuman_stub`)
 - `POST /tasks/webhook/provider` updates task status from provider callbacks (`x-webhook-token`)
+- `POST /tasks/:taskId/evidence` stores proof metadata with checksum and capture timestamp
+- `GET /tasks/:taskId/evidence` retrieves evidence by task

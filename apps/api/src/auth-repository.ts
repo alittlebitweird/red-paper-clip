@@ -116,6 +116,16 @@ export type TaskRecord = {
   updatedAt: string;
 };
 
+export type EvidenceRecord = {
+  id: number;
+  taskId: number;
+  mediaUrl: string;
+  checksum: string;
+  geotag?: string;
+  capturedAt: string;
+  createdAt: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -136,7 +146,16 @@ export interface AuthRepository {
     providerName: string;
     providerTaskId: string;
   }): Promise<TaskRecord>;
+  getTaskById(taskId: number): Promise<TaskRecord | null>;
   updateTaskStatusByProviderTaskId(providerTaskId: string, status: TaskStatus): Promise<TaskRecord | null>;
+  createEvidenceRecord(input: {
+    taskId: number;
+    mediaUrl: string;
+    checksum: string;
+    geotag?: string;
+    capturedAt: string;
+  }): Promise<EvidenceRecord>;
+  listEvidenceByTaskId(taskId: number): Promise<EvidenceRecord[]>;
   close?: () => Promise<void>;
 }
 
@@ -589,6 +608,41 @@ export class PgAuthRepository implements AuthRepository {
     };
   }
 
+  async getTaskById(taskId: number): Promise<TaskRecord | null> {
+    const result = await this.pool.query<{
+      id: number;
+      type: "inspect" | "pickup" | "meet" | "ship";
+      assignee: string | null;
+      status: TaskStatus;
+      provider_name: string;
+      provider_task_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      SELECT id, type, assignee, status, provider_name, provider_task_id, updated_at
+      FROM tasks
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [taskId]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      type: row.type,
+      assignee: row.assignee ?? undefined,
+      status: row.status,
+      providerName: row.provider_name,
+      providerTaskId: row.provider_task_id ?? undefined,
+      updatedAt: row.updated_at
+    };
+  }
+
   async updateTaskStatusByProviderTaskId(providerTaskId: string, status: TaskStatus): Promise<TaskRecord | null> {
     const result = await this.pool.query<{
       id: number;
@@ -622,6 +676,72 @@ export class PgAuthRepository implements AuthRepository {
       providerTaskId: row.provider_task_id ?? undefined,
       updatedAt: row.updated_at
     };
+  }
+
+  async createEvidenceRecord(input: {
+    taskId: number;
+    mediaUrl: string;
+    checksum: string;
+    geotag?: string;
+    capturedAt: string;
+  }): Promise<EvidenceRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      task_id: number;
+      media_url: string;
+      checksum: string;
+      geotag: string | null;
+      captured_at: string;
+      created_at: string;
+    }>(
+      `
+      INSERT INTO evidence (task_id, media_url, checksum, geotag, captured_at)
+      VALUES ($1, $2, $3, $4, $5::timestamptz)
+      RETURNING id, task_id, media_url, checksum, geotag, captured_at, created_at
+      `,
+      [input.taskId, input.mediaUrl, input.checksum, input.geotag ?? null, input.capturedAt]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      taskId: row.task_id,
+      mediaUrl: row.media_url,
+      checksum: row.checksum,
+      geotag: row.geotag ?? undefined,
+      capturedAt: row.captured_at,
+      createdAt: row.created_at
+    };
+  }
+
+  async listEvidenceByTaskId(taskId: number): Promise<EvidenceRecord[]> {
+    const result = await this.pool.query<{
+      id: number;
+      task_id: number;
+      media_url: string;
+      checksum: string;
+      geotag: string | null;
+      captured_at: string;
+      created_at: string;
+    }>(
+      `
+      SELECT id, task_id, media_url, checksum, geotag, captured_at, created_at
+      FROM evidence
+      WHERE task_id = $1
+      ORDER BY created_at DESC
+      `,
+      [taskId]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      mediaUrl: row.media_url,
+      checksum: row.checksum,
+      geotag: row.geotag ?? undefined,
+      capturedAt: row.captured_at,
+      createdAt: row.created_at
+    }));
   }
 
   async close(): Promise<void> {

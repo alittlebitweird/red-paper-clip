@@ -29,7 +29,9 @@ class InMemoryAuthRepository implements AuthRepository {
   private readonly usersByHash = new Map<string, AuthUser>();
   private readonly opportunitiesByDedupeKey = new Map<string, OpportunityRecord>();
   private readonly offersById = new Map<number, { id: number; opportunityId: number; status: "draft" | "approved" | "rejected" | "sent"; offerTerms: Record<string, unknown>; sentByHumanId?: string; updatedAt: string }>();
+  private readonly tasksById = new Map<number, { id: number; type: "inspect" | "pickup" | "meet" | "ship"; assignee?: string; status: "queued" | "in_progress" | "completed" | "failed"; providerName: string; providerTaskId?: string; updatedAt: string }>();
   private readonly tasksByProviderTaskId = new Map<string, { id: number; type: "inspect" | "pickup" | "meet" | "ship"; assignee?: string; status: "queued" | "in_progress" | "completed" | "failed"; providerName: string; providerTaskId?: string; updatedAt: string }>();
+  private readonly evidenceByTaskId = new Map<number, Array<{ id: number; taskId: number; mediaUrl: string; checksum: string; geotag?: string; capturedAt: string; createdAt: string }>>();
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
@@ -37,6 +39,7 @@ class InMemoryAuthRepository implements AuthRepository {
   private valuationIdSequence = 1;
   private offerIdSequence = 1;
   private taskIdSequence = 1;
+  private evidenceIdSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -177,8 +180,13 @@ class InMemoryAuthRepository implements AuthRepository {
       providerTaskId: input.providerTaskId,
       updatedAt: new Date().toISOString()
     };
+    this.tasksById.set(task.id, task);
     this.tasksByProviderTaskId.set(input.providerTaskId, task);
     return task;
+  }
+
+  async getTaskById(taskId: number) {
+    return this.tasksById.get(taskId) ?? null;
   }
 
   async updateTaskStatusByProviderTaskId(
@@ -196,8 +204,35 @@ class InMemoryAuthRepository implements AuthRepository {
       status,
       updatedAt: new Date().toISOString()
     };
+    this.tasksById.set(updated.id, updated);
     this.tasksByProviderTaskId.set(providerTaskId, updated);
     return updated;
+  }
+
+  async createEvidenceRecord(input: {
+    taskId: number;
+    mediaUrl: string;
+    checksum: string;
+    geotag?: string;
+    capturedAt: string;
+  }) {
+    const record = {
+      id: this.evidenceIdSequence++,
+      taskId: input.taskId,
+      mediaUrl: input.mediaUrl,
+      checksum: input.checksum,
+      geotag: input.geotag,
+      capturedAt: input.capturedAt,
+      createdAt: new Date().toISOString()
+    };
+    const existing = this.evidenceByTaskId.get(input.taskId) ?? [];
+    existing.unshift(record);
+    this.evidenceByTaskId.set(input.taskId, existing);
+    return record;
+  }
+
+  async listEvidenceByTaskId(taskId: number) {
+    return this.evidenceByTaskId.get(taskId) ?? [];
   }
 }
 
@@ -611,6 +646,61 @@ describe("api auth and authorization", () => {
     expect(createdTask.json().providerName).toBe("rentahuman_stub");
     expect(webhook.statusCode).toBe(200);
     expect(webhook.json().status).toBe("completed");
+  });
+
+  it("captures and lists evidence linked to task ids", async () => {
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: "/tasks",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        type: "pickup",
+        assignee: "runner-2"
+      }
+    });
+
+    const taskId = taskResponse.json().id;
+
+    const evidenceResponse = await app.inject({
+      method: "POST",
+      url: `/tasks/${taskId}/evidence`,
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        mediaUrl: "https://example.com/proof/pickup.jpg",
+        geotag: "37.7749,-122.4194"
+      }
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/tasks/${taskId}/evidence`,
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(evidenceResponse.statusCode).toBe(201);
+    expect(evidenceResponse.json().checksum).toHaveLength(64);
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().evidence).toHaveLength(1);
+  });
+
+  it("validates required evidence fields", async () => {
+    const taskResponse = await app.inject({
+      method: "POST",
+      url: "/tasks",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        type: "inspect"
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/tasks/${taskResponse.json().id}/evidence`,
+      headers: { "x-api-key": "operator-key" },
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it("rejects provider webhook with invalid token", async () => {
