@@ -97,3 +97,12 @@ npm run db:migrate:down -w @rpc/db
 - Position must be in `accepted_pending_verification`
 - Passing checks move to `verified`; failed checks move to `failed` or `disputed`
 - `GET /portfolio/positions/:positionId/verification-checklist` lists checklist history
+
+## Dashboard KPI API
+- `GET /dashboard/kpi` returns live metrics and latest snapshot
+- `POST /dashboard/kpi/snapshot` persists a KPI snapshot
+- `GET /dashboard/kpi/snapshots` returns historical snapshots
+
+## Daily Snapshot Job
+- Worker can auto-create daily snapshots when `AUTO_SNAPSHOT_ENABLED=true`
+- Requires `SNAPSHOT_API_KEY` with `admin` or `operator` role access

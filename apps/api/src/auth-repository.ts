@@ -149,6 +149,19 @@ export type PortfolioVerificationChecklistRecord = {
   createdAt: string;
 };
 
+export type DashboardMetrics = {
+  valueMultiple: number;
+  closeRate: number;
+  medianCycleTimeDays: number;
+  fraudLossPct: number;
+  activeTasks: number;
+};
+
+export type KpiSnapshotRecord = DashboardMetrics & {
+  id: number;
+  createdAt: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -202,6 +215,10 @@ export interface AuthRepository {
   listPortfolioVerificationChecklists(
     portfolioPositionId: number
   ): Promise<PortfolioVerificationChecklistRecord[]>;
+  computeDashboardMetrics(seedCostUsd: number): Promise<DashboardMetrics>;
+  createKpiSnapshot(metrics: DashboardMetrics): Promise<KpiSnapshotRecord>;
+  listKpiSnapshots(limit: number): Promise<KpiSnapshotRecord[]>;
+  getLatestKpiSnapshot(): Promise<KpiSnapshotRecord | null>;
   close?: () => Promise<void>;
 }
 
@@ -1024,6 +1041,158 @@ export class PgAuthRepository implements AuthRepository {
       notes: row.notes ?? undefined,
       createdAt: row.created_at
     }));
+  }
+
+  async computeDashboardMetrics(seedCostUsd: number): Promise<DashboardMetrics> {
+    const normalizedSeedCost = seedCostUsd > 0 ? seedCostUsd : 1;
+
+    const currentValueResult = await this.pool.query<{ total_value: string | null }>(
+      `
+      SELECT COALESCE(SUM(i.est_value_usd), 0)::text AS total_value
+      FROM portfolio_positions pp
+      JOIN items i ON i.id = pp.item_id
+      WHERE pp.current_status IN (
+        'seeded',
+        'sourcing',
+        'screened',
+        'negotiating',
+        'accepted_pending_verification',
+        'verified',
+        'completed'
+      )
+      `
+    );
+
+    const offerRateResult = await this.pool.query<{ sent_count: string; total_count: string }>(
+      `
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'sent')::text AS sent_count,
+        COUNT(*)::text AS total_count
+      FROM offers
+      `
+    );
+
+    const cycleTimeResult = await this.pool.query<{ median_days: string | null }>(
+      `
+      SELECT
+        percentile_cont(0.5) WITHIN GROUP (
+          ORDER BY EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400
+        )::text AS median_days
+      FROM portfolio_positions
+      WHERE current_status = 'completed'
+      `
+    );
+
+    const fraudLossResult = await this.pool.query<{ disputed_value: string | null; total_value: string | null }>(
+      `
+      SELECT
+        COALESCE(SUM(CASE WHEN pp.current_status = 'disputed' THEN pp.acquisition_value_usd ELSE 0 END), 0)::text AS disputed_value,
+        COALESCE(SUM(pp.acquisition_value_usd), 0)::text AS total_value
+      FROM portfolio_positions pp
+      `
+    );
+
+    const activeTasksResult = await this.pool.query<{ active_count: string }>(
+      `
+      SELECT COUNT(*)::text AS active_count
+      FROM tasks
+      WHERE status IN ('queued', 'in_progress')
+      `
+    );
+
+    const totalValue = Number(currentValueResult.rows[0].total_value ?? 0);
+    const sentCount = Number(offerRateResult.rows[0].sent_count ?? 0);
+    const totalOfferCount = Number(offerRateResult.rows[0].total_count ?? 0);
+    const medianCycleTimeDays = Number(cycleTimeResult.rows[0].median_days ?? 0);
+    const disputedValue = Number(fraudLossResult.rows[0].disputed_value ?? 0);
+    const totalAcquisitionValue = Number(fraudLossResult.rows[0].total_value ?? 0);
+    const activeTasks = Number(activeTasksResult.rows[0].active_count ?? 0);
+
+    return {
+      valueMultiple: Number((totalValue / normalizedSeedCost).toFixed(4)),
+      closeRate: Number((totalOfferCount > 0 ? sentCount / totalOfferCount : 0).toFixed(4)),
+      medianCycleTimeDays: Number(medianCycleTimeDays.toFixed(4)),
+      fraudLossPct: Number((totalAcquisitionValue > 0 ? (disputedValue / totalAcquisitionValue) * 100 : 0).toFixed(4)),
+      activeTasks
+    };
+  }
+
+  async createKpiSnapshot(metrics: DashboardMetrics): Promise<KpiSnapshotRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      value_multiple: string;
+      close_rate: string;
+      median_cycle_time_days: string;
+      fraud_loss_pct: string;
+      active_tasks: number;
+      created_at: string;
+    }>(
+      `
+      INSERT INTO kpi_snapshots (
+        value_multiple,
+        close_rate,
+        median_cycle_time_days,
+        fraud_loss_pct,
+        active_tasks
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, value_multiple, close_rate, median_cycle_time_days, fraud_loss_pct, active_tasks, created_at
+      `,
+      [
+        metrics.valueMultiple,
+        metrics.closeRate,
+        metrics.medianCycleTimeDays,
+        metrics.fraudLossPct,
+        metrics.activeTasks
+      ]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      valueMultiple: Number(row.value_multiple),
+      closeRate: Number(row.close_rate),
+      medianCycleTimeDays: Number(row.median_cycle_time_days),
+      fraudLossPct: Number(row.fraud_loss_pct),
+      activeTasks: row.active_tasks,
+      createdAt: row.created_at
+    };
+  }
+
+  async listKpiSnapshots(limit: number): Promise<KpiSnapshotRecord[]> {
+    const boundedLimit = Math.max(1, Math.min(limit, 200));
+    const result = await this.pool.query<{
+      id: number;
+      value_multiple: string;
+      close_rate: string;
+      median_cycle_time_days: string;
+      fraud_loss_pct: string;
+      active_tasks: number;
+      created_at: string;
+    }>(
+      `
+      SELECT id, value_multiple, close_rate, median_cycle_time_days, fraud_loss_pct, active_tasks, created_at
+      FROM kpi_snapshots
+      ORDER BY created_at DESC
+      LIMIT $1
+      `,
+      [boundedLimit]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      valueMultiple: Number(row.value_multiple),
+      closeRate: Number(row.close_rate),
+      medianCycleTimeDays: Number(row.median_cycle_time_days),
+      fraudLossPct: Number(row.fraud_loss_pct),
+      activeTasks: row.active_tasks,
+      createdAt: row.created_at
+    }));
+  }
+
+  async getLatestKpiSnapshot(): Promise<KpiSnapshotRecord | null> {
+    const snapshots = await this.listKpiSnapshots(1);
+    return snapshots.length > 0 ? snapshots[0] : null;
   }
 
   async close(): Promise<void> {

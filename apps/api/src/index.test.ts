@@ -35,6 +35,7 @@ class InMemoryAuthRepository implements AuthRepository {
   private readonly evidenceByTaskId = new Map<number, Array<{ id: number; taskId: number; mediaUrl: string; checksum: string; geotag?: string; capturedAt: string; createdAt: string }>>();
   private readonly portfolioPositionsById = new Map<number, { id: number; itemId: number; acquiredAt: string; acquisitionValueUsd?: number; currentStatus: PortfolioStatus; createdAt: string; updatedAt: string }>();
   private readonly portfolioChecklistsByPositionId = new Map<number, Array<{ id: number; portfolioPositionId: number; checks: Record<string, boolean>; passed: boolean; outcomeStatus: "verified" | "failed" | "disputed"; createdByUserId: string; notes?: string; createdAt: string }>>();
+  private readonly kpiSnapshots: Array<{ id: number; valueMultiple: number; closeRate: number; medianCycleTimeDays: number; fraudLossPct: number; activeTasks: number; createdAt: string }> = [];
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
@@ -45,6 +46,7 @@ class InMemoryAuthRepository implements AuthRepository {
   private evidenceIdSequence = 1;
   private portfolioPositionSequence = 1;
   private portfolioChecklistSequence = 1;
+  private kpiSnapshotSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -306,6 +308,65 @@ class InMemoryAuthRepository implements AuthRepository {
 
   async listPortfolioVerificationChecklists(portfolioPositionId: number) {
     return this.portfolioChecklistsByPositionId.get(portfolioPositionId) ?? [];
+  }
+
+  async computeDashboardMetrics(seedCostUsd: number) {
+    const activePositions = Array.from(this.portfolioPositionsById.values()).filter((position) =>
+      [
+        "seeded",
+        "sourcing",
+        "screened",
+        "negotiating",
+        "accepted_pending_verification",
+        "verified",
+        "completed"
+      ].includes(position.currentStatus)
+    );
+    const totalValue = activePositions.reduce((sum, position) => sum + (position.acquisitionValueUsd ?? 0), 0);
+    const totalOffers = this.offersById.size;
+    const sentOffers = Array.from(this.offersById.values()).filter((offer) => offer.status === "sent").length;
+    const disputedValue = Array.from(this.portfolioPositionsById.values())
+      .filter((position) => position.currentStatus === "disputed")
+      .reduce((sum, position) => sum + (position.acquisitionValueUsd ?? 0), 0);
+    const totalAcquisition = Array.from(this.portfolioPositionsById.values()).reduce(
+      (sum, position) => sum + (position.acquisitionValueUsd ?? 0),
+      0
+    );
+    const activeTasks = Array.from(this.tasksById.values()).filter((task) =>
+      ["queued", "in_progress"].includes(task.status)
+    ).length;
+
+    return {
+      valueMultiple: Number((totalValue / (seedCostUsd > 0 ? seedCostUsd : 1)).toFixed(4)),
+      closeRate: Number((totalOffers > 0 ? sentOffers / totalOffers : 0).toFixed(4)),
+      medianCycleTimeDays: 0,
+      fraudLossPct: Number((totalAcquisition > 0 ? (disputedValue / totalAcquisition) * 100 : 0).toFixed(4)),
+      activeTasks
+    };
+  }
+
+  async createKpiSnapshot(metrics: {
+    valueMultiple: number;
+    closeRate: number;
+    medianCycleTimeDays: number;
+    fraudLossPct: number;
+    activeTasks: number;
+  }) {
+    const record = {
+      id: this.kpiSnapshotSequence++,
+      ...metrics,
+      createdAt: new Date().toISOString()
+    };
+    this.kpiSnapshots.unshift(record);
+    return record;
+  }
+
+  async listKpiSnapshots(limit: number) {
+    return this.kpiSnapshots.slice(0, limit);
+  }
+
+  async getLatestKpiSnapshot() {
+    return this.kpiSnapshots.length > 0 ? this.kpiSnapshots[0] : null;
   }
 }
 
@@ -891,6 +952,43 @@ describe("api auth and authorization", () => {
     expect(verify.statusCode).toBe(200);
     expect(verify.json().position.currentStatus).toBe("disputed");
     expect(verify.json().checklist.outcomeStatus).toBe("disputed");
+  });
+
+  it("creates and lists KPI dashboard snapshots", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/portfolio/positions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        title: "Current asset",
+        acquisitionValueUsd: 9
+      }
+    });
+
+    const snapshot = await app.inject({
+      method: "POST",
+      url: "/dashboard/kpi/snapshot",
+      headers: { "x-api-key": "operator-key" },
+      payload: { seedCostUsd: 0.9 }
+    });
+
+    const dashboard = await app.inject({
+      method: "GET",
+      url: "/dashboard/kpi",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    const snapshots = await app.inject({
+      method: "GET",
+      url: "/dashboard/kpi/snapshots?limit=10",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(snapshot.statusCode).toBe(201);
+    expect(dashboard.statusCode).toBe(200);
+    expect(dashboard.json().metrics.valueMultiple).toBeGreaterThan(0);
+    expect(snapshots.statusCode).toBe(200);
+    expect(snapshots.json().snapshots.length).toBeGreaterThanOrEqual(1);
   });
 
   it("rejects provider webhook with invalid token", async () => {

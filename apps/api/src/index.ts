@@ -124,6 +124,15 @@ type PortfolioParams = {
   positionId: string;
 };
 
+type DashboardQuery = {
+  seedCostUsd?: number;
+  limit?: number;
+};
+
+type DashboardSnapshotBody = {
+  seedCostUsd?: number;
+};
+
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
 
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -1128,6 +1137,77 @@ export const buildServer = (options: BuildServerOptions = {}) => {
 
       const checklists = await authRepository.listPortfolioVerificationChecklists(positionId);
       return reply.status(200).send({ checklists });
+    }
+  );
+
+  app.get<{ Querystring: DashboardQuery }>(
+    "/dashboard/kpi",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const seedCostRaw = request.query.seedCostUsd;
+      const seedCostUsd =
+        typeof seedCostRaw === "number"
+          ? seedCostRaw
+          : typeof seedCostRaw === "string"
+            ? Number(seedCostRaw)
+            : 0.9;
+
+      if (!Number.isFinite(seedCostUsd) || seedCostUsd <= 0) {
+        return reply.status(400).send({ error: "seedCostUsd must be a positive number" });
+      }
+
+      const metrics = await authRepository.computeDashboardMetrics(seedCostUsd);
+      const latestSnapshot = await authRepository.getLatestKpiSnapshot();
+
+      return reply.status(200).send({ metrics, latestSnapshot });
+    }
+  );
+
+  app.post<{ Body: DashboardSnapshotBody }>(
+    "/dashboard/kpi/snapshot",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+      const seedCostUsd = typeof request.body.seedCostUsd === "number" ? request.body.seedCostUsd : 0.9;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      if (!Number.isFinite(seedCostUsd) || seedCostUsd <= 0) {
+        return reply.status(400).send({ error: "seedCostUsd must be a positive number" });
+      }
+
+      const metrics = await authRepository.computeDashboardMetrics(seedCostUsd);
+      const snapshot = await authRepository.createKpiSnapshot(metrics);
+
+      await authRepository.writeEvent({
+        eventType: "dashboard.snapshot_created",
+        entityType: "kpi_snapshot",
+        entityId: String(snapshot.id),
+        payload: {
+          actorUserId: user.id,
+          valueMultiple: snapshot.valueMultiple
+        }
+      });
+
+      return reply.status(201).send(snapshot);
+    }
+  );
+
+  app.get<{ Querystring: DashboardQuery }>(
+    "/dashboard/kpi/snapshots",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const limitRaw = request.query.limit;
+      const limit = typeof limitRaw === "number" ? limitRaw : typeof limitRaw === "string" ? Number(limitRaw) : 30;
+
+      if (!Number.isFinite(limit) || limit <= 0) {
+        return reply.status(400).send({ error: "limit must be a positive number" });
+      }
+
+      const snapshots = await authRepository.listKpiSnapshots(Math.floor(limit));
+      return reply.status(200).send({ snapshots });
     }
   );
 
