@@ -31,6 +31,8 @@
 - Implemented `RPC-011`: evidence capture and retrieval pipeline linked to tasks (`2eab9be`).
 - Updated local trackers for `RPC-011` completion (`df57343`).
 - Implemented `RPC-012` and `RPC-013`: verification checklist workflow and portfolio state machine (`6657ea4`).
+- Updated local trackers for `RPC-012` and `RPC-013` completion (`d2851b0`).
+- Implemented `RPC-014`: KPI dashboard endpoints and daily snapshot worker job (`9b10302`).
 
 ## Log Format
 - Date

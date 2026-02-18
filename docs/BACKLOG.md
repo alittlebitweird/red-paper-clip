@@ -20,7 +20,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-013 Portfolio state machine
 
 ## Milestone 3: Visibility and Readiness
-- [ ] RPC-014 KPI dashboard
+- [x] RPC-014 KPI dashboard
 - [ ] RPC-015 Simulation and smoke tests
 
 ## MVP Definition of Done
