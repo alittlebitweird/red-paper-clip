@@ -23,6 +23,8 @@
 - Implemented `RPC-007`: weighted scoring engine and ranked opportunity endpoint (`f0f5c45`).
 - Updated local trackers for `RPC-007` completion (`777688b`).
 - Implemented `RPC-008`: policy guard middleware for outbound actions (`7e84085`).
+- Updated local trackers for `RPC-008` completion (`809f217`).
+- Implemented `RPC-009`: draft/approve/reject/send offer workflow with state transitions (`a52dfbd`).
 
 ## Log Format
 - Date
