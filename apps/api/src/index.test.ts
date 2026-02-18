@@ -10,17 +10,33 @@ import {
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
 import { buildServer } from "./index.js";
+import { type TaskProvider } from "./task-provider.js";
+
+class DeterministicTaskProvider implements TaskProvider {
+  private sequence = 1;
+
+  async createTask(input: { type: "inspect" | "pickup" | "meet" | "ship" }) {
+    const providerTaskId = `${input.type}-${this.sequence}`;
+    this.sequence += 1;
+    return {
+      providerName: "rentahuman_stub",
+      providerTaskId
+    };
+  }
+}
 
 class InMemoryAuthRepository implements AuthRepository {
   private readonly usersByHash = new Map<string, AuthUser>();
   private readonly opportunitiesByDedupeKey = new Map<string, OpportunityRecord>();
   private readonly offersById = new Map<number, { id: number; opportunityId: number; status: "draft" | "approved" | "rejected" | "sent"; offerTerms: Record<string, unknown>; sentByHumanId?: string; updatedAt: string }>();
+  private readonly tasksByProviderTaskId = new Map<string, { id: number; type: "inspect" | "pickup" | "meet" | "ship"; assignee?: string; status: "queued" | "in_progress" | "completed" | "failed"; providerName: string; providerTaskId?: string; updatedAt: string }>();
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
   private opportunityIdSequence = 1;
   private itemIdSequence = 1;
   private valuationIdSequence = 1;
   private offerIdSequence = 1;
+  private taskIdSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -145,6 +161,44 @@ class InMemoryAuthRepository implements AuthRepository {
     this.offersById.set(offerId, updated);
     return updated;
   }
+
+  async createTaskRecord(input: {
+    type: "inspect" | "pickup" | "meet" | "ship";
+    assignee?: string;
+    providerName: string;
+    providerTaskId: string;
+  }) {
+    const task = {
+      id: this.taskIdSequence++,
+      type: input.type,
+      assignee: input.assignee,
+      status: "queued" as const,
+      providerName: input.providerName,
+      providerTaskId: input.providerTaskId,
+      updatedAt: new Date().toISOString()
+    };
+    this.tasksByProviderTaskId.set(input.providerTaskId, task);
+    return task;
+  }
+
+  async updateTaskStatusByProviderTaskId(
+    providerTaskId: string,
+    status: "queued" | "in_progress" | "completed" | "failed"
+  ) {
+    const existing = this.tasksByProviderTaskId.get(providerTaskId);
+
+    if (!existing) {
+      return null;
+    }
+
+    const updated = {
+      ...existing,
+      status,
+      updatedAt: new Date().toISOString()
+    };
+    this.tasksByProviderTaskId.set(providerTaskId, updated);
+    return updated;
+  }
 }
 
 describe("api auth and authorization", () => {
@@ -156,7 +210,7 @@ describe("api auth and authorization", () => {
     repository.addUser("admin-key", { id: 1, email: "admin@openclaw.local", role: "admin" });
     repository.addUser("operator-key", { id: 2, email: "operator@openclaw.local", role: "operator" });
     repository.addUser("reviewer-key", { id: 3, email: "reviewer@openclaw.local", role: "reviewer" });
-    app = buildServer({ authRepository: repository });
+    app = buildServer({ authRepository: repository, taskProvider: new DeterministicTaskProvider() });
   });
 
   afterEach(async () => {
@@ -528,5 +582,48 @@ describe("api auth and authorization", () => {
 
     expect(invalid.statusCode).toBe(409);
     expect(invalid.json().error).toContain("Invalid transition");
+  });
+
+  it("creates tasks through provider adapter and updates via webhook", async () => {
+    const createdTask = await app.inject({
+      method: "POST",
+      url: "/tasks",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        type: "inspect",
+        assignee: "runner-1"
+      }
+    });
+
+    const providerTaskId = createdTask.json().providerTaskId;
+
+    const webhook = await app.inject({
+      method: "POST",
+      url: "/tasks/webhook/provider",
+      headers: { "x-webhook-token": "dev-webhook-token" },
+      payload: {
+        providerTaskId,
+        status: "completed"
+      }
+    });
+
+    expect(createdTask.statusCode).toBe(201);
+    expect(createdTask.json().providerName).toBe("rentahuman_stub");
+    expect(webhook.statusCode).toBe(200);
+    expect(webhook.json().status).toBe("completed");
+  });
+
+  it("rejects provider webhook with invalid token", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/tasks/webhook/provider",
+      headers: { "x-webhook-token": "wrong" },
+      payload: {
+        providerTaskId: "inspect-1",
+        status: "completed"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 });

@@ -104,6 +104,18 @@ export type OfferRecord = {
   updatedAt: string;
 };
 
+export type TaskStatus = "queued" | "in_progress" | "completed" | "failed";
+
+export type TaskRecord = {
+  id: number;
+  type: "inspect" | "pickup" | "meet" | "ship";
+  assignee?: string;
+  status: TaskStatus;
+  providerName: string;
+  providerTaskId?: string;
+  updatedAt: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -118,6 +130,13 @@ export interface AuthRepository {
   createOfferDraft(opportunityId: number, offerTerms: Record<string, unknown>): Promise<OfferRecord>;
   getOfferById(offerId: number): Promise<OfferRecord | null>;
   updateOfferStatus(offerId: number, status: OfferStatus, sentByHumanId?: string): Promise<OfferRecord>;
+  createTaskRecord(input: {
+    type: "inspect" | "pickup" | "meet" | "ship";
+    assignee?: string;
+    providerName: string;
+    providerTaskId: string;
+  }): Promise<TaskRecord>;
+  updateTaskStatusByProviderTaskId(providerTaskId: string, status: TaskStatus): Promise<TaskRecord | null>;
   close?: () => Promise<void>;
 }
 
@@ -531,6 +550,76 @@ export class PgAuthRepository implements AuthRepository {
       status: row.status,
       offerTerms: row.offer_terms,
       sentByHumanId: row.sent_by_human_id ?? undefined,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async createTaskRecord(input: {
+    type: "inspect" | "pickup" | "meet" | "ship";
+    assignee?: string;
+    providerName: string;
+    providerTaskId: string;
+  }): Promise<TaskRecord> {
+    const result = await this.pool.query<{
+      id: number;
+      type: "inspect" | "pickup" | "meet" | "ship";
+      assignee: string | null;
+      status: TaskStatus;
+      provider_name: string;
+      provider_task_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      INSERT INTO tasks (type, assignee, status, provider_name, provider_task_id)
+      VALUES ($1, $2, 'queued', $3, $4)
+      RETURNING id, type, assignee, status, provider_name, provider_task_id, updated_at
+      `,
+      [input.type, input.assignee ?? null, input.providerName, input.providerTaskId]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      type: row.type,
+      assignee: row.assignee ?? undefined,
+      status: row.status,
+      providerName: row.provider_name,
+      providerTaskId: row.provider_task_id ?? undefined,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async updateTaskStatusByProviderTaskId(providerTaskId: string, status: TaskStatus): Promise<TaskRecord | null> {
+    const result = await this.pool.query<{
+      id: number;
+      type: "inspect" | "pickup" | "meet" | "ship";
+      assignee: string | null;
+      status: TaskStatus;
+      provider_name: string;
+      provider_task_id: string | null;
+      updated_at: string;
+    }>(
+      `
+      UPDATE tasks
+      SET status = $2, updated_at = NOW()
+      WHERE provider_task_id = $1
+      RETURNING id, type, assignee, status, provider_name, provider_task_id, updated_at
+      `,
+      [providerTaskId, status]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      type: row.type,
+      assignee: row.assignee ?? undefined,
+      status: row.status,
+      providerName: row.provider_name,
+      providerTaskId: row.provider_task_id ?? undefined,
       updatedAt: row.updated_at
     };
   }

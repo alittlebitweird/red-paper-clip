@@ -79,3 +79,8 @@ npm run db:migrate:down -w @rpc/db
 - `POST /offers/:offerId/reject` (roles: `admin`, `reviewer`)
 - `POST /offers/:offerId/send` (roles: `admin`, `operator`)
 - `GET /offers/:offerId` (roles: `admin`, `operator`, `reviewer`)
+
+## Task Execution API
+- `POST /tasks` (roles: `admin`, `operator`)
+- Dispatches `inspect/pickup/meet/ship` through provider adapter (`rentahuman_stub`)
+- `POST /tasks/webhook/provider` updates task status from provider callbacks (`x-webhook-token`)

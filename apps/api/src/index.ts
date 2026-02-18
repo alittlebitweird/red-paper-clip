@@ -7,12 +7,14 @@ import {
   type AuthUser,
   type OfferStatus,
   type PolicyRuleInput,
+  type TaskStatus,
   type UserRole,
   type ValuationCompInput,
   PgAuthRepository
 } from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
 import { rankCandidates } from "./scoring.js";
+import { RentAHumanStubProvider, type TaskProvider } from "./task-provider.js";
 import { computeValuation } from "./valuation.js";
 
 declare module "fastify" {
@@ -23,6 +25,7 @@ declare module "fastify" {
 
 type BuildServerOptions = {
   authRepository?: AuthRepository;
+  taskProvider?: TaskProvider;
 };
 
 type OpportunityIntakeBody = {
@@ -65,6 +68,17 @@ type OfferDraftBody = {
 
 type OfferParams = {
   offerId: string;
+};
+
+type TaskCreateBody = {
+  type?: "inspect" | "pickup" | "meet" | "ship";
+  assignee?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type TaskWebhookBody = {
+  providerTaskId?: string;
+  status?: TaskStatus;
 };
 
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
@@ -169,6 +183,7 @@ const getDefaultAuthRepository = () => {
 export const buildServer = (options: BuildServerOptions = {}) => {
   const app = Fastify({ logger: true });
   const authRepository = options.authRepository ?? getDefaultAuthRepository();
+  const taskProvider = options.taskProvider ?? new RentAHumanStubProvider();
   const allowedOfferTransitions: Record<OfferStatus, OfferStatus[]> = {
     draft: ["approved", "rejected"],
     approved: ["sent", "rejected"],
@@ -230,6 +245,8 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       request.authUser = user;
     };
   };
+
+  const validTaskStatuses: TaskStatus[] = ["queued", "in_progress", "completed", "failed"];
 
   const parsePositiveId = (rawValue: string) => {
     const parsed = Number(rawValue);
@@ -642,6 +659,89 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       return reply.status(200).send(result.offer);
     }
   );
+
+  app.post<{ Body: TaskCreateBody }>(
+    "/tasks",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const taskType = request.body.type;
+
+      if (!taskType || !["inspect", "pickup", "meet", "ship"].includes(taskType)) {
+        return reply.status(400).send({ error: "type must be one of inspect, pickup, meet, ship" });
+      }
+
+      const providerTask = await taskProvider.createTask({
+        type: taskType,
+        assignee: request.body.assignee,
+        metadata: request.body.metadata
+      });
+
+      const task = await authRepository.createTaskRecord({
+        type: taskType,
+        assignee: request.body.assignee,
+        providerName: providerTask.providerName,
+        providerTaskId: providerTask.providerTaskId
+      });
+
+      await authRepository.writeEvent({
+        eventType: "task.created",
+        entityType: "task",
+        entityId: String(task.id),
+        payload: {
+          actorUserId: user.id,
+          providerName: task.providerName,
+          providerTaskId: task.providerTaskId
+        }
+      });
+
+      return reply.status(201).send(task);
+    }
+  );
+
+  app.post<{ Body: TaskWebhookBody }>("/tasks/webhook/provider", async (request, reply) => {
+    const expectedToken = process.env.PROVIDER_WEBHOOK_TOKEN ?? "dev-webhook-token";
+    const webhookToken = request.headers["x-webhook-token"];
+
+    if (webhookToken !== expectedToken) {
+      return reply.status(401).send({ error: "Invalid webhook token" });
+    }
+
+    const providerTaskId = request.body.providerTaskId;
+    const status = request.body.status;
+
+    if (
+      typeof providerTaskId !== "string" ||
+      providerTaskId.length === 0 ||
+      !status ||
+      !validTaskStatuses.includes(status)
+    ) {
+      return reply.status(400).send({ error: "providerTaskId and valid status are required" });
+    }
+
+    const task = await authRepository.updateTaskStatusByProviderTaskId(providerTaskId, status);
+
+    if (!task) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
+
+    await authRepository.writeEvent({
+      eventType: "task.status_changed",
+      entityType: "task",
+      entityId: String(task.id),
+      payload: {
+        providerTaskId,
+        status
+      }
+    });
+
+    return reply.status(200).send(task);
+  });
 
   app.addHook("onClose", async () => {
     if (authRepository.close) {
