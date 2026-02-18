@@ -30,6 +30,11 @@ type OpportunityIntakeBody = {
   priceUsd?: number;
 };
 
+type OpportunityListQuery = {
+  status?: string;
+  limit?: number;
+};
+
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
 
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -221,6 +226,25 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       });
 
       return reply.status(201).send(created);
+    }
+  );
+
+  app.get<{ Querystring: OpportunityListQuery }>(
+    "/opportunities",
+    { preHandler: requireRole(["admin", "operator", "reviewer"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const opportunities = await authRepository.listOpportunities({
+        status: typeof request.query.status === "string" ? request.query.status : undefined,
+        limit: typeof request.query.limit === "number" ? request.query.limit : undefined
+      });
+
+      return reply.status(200).send({ opportunities });
     }
   );
 

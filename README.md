@@ -29,6 +29,8 @@ This starts:
 
 For auth-enabled API routes, ensure `DATABASE_URL` is configured and seed users are loaded.
 
+The web console supports manual opportunity intake and review against the API.
+
 ## Validation commands
 ```bash
 npm run lint
@@ -52,3 +54,7 @@ npm run db:migrate:down -w @rpc/db
 - `ADMIN_API_KEY` (default `dev-admin-key`)
 - `OPERATOR_API_KEY` (default `dev-operator-key`)
 - `REVIEWER_API_KEY` (default `dev-reviewer-key`)
+
+## Opportunity API
+- `POST /opportunities` (roles: `admin`, `operator`)
+- `GET /opportunities` (roles: `admin`, `operator`, `reviewer`)

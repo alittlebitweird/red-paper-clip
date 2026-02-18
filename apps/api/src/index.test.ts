@@ -46,11 +46,17 @@ class InMemoryAuthRepository implements AuthRepository {
       category: input.category,
       location: input.location,
       askValueUsd: input.askValueUsd,
-      dedupeKey: input.dedupeKey
+      dedupeKey: input.dedupeKey,
+      createdAt: new Date().toISOString()
     };
     this.opportunityIdSequence += 1;
     this.opportunitiesByDedupeKey.set(input.dedupeKey, record);
     return record;
+  }
+
+  async listOpportunities(options: { status?: string; limit?: number }): Promise<OpportunityRecord[]> {
+    const limit = options.limit ?? 50;
+    return Array.from(this.opportunitiesByDedupeKey.values()).slice(0, limit);
   }
 }
 
@@ -62,6 +68,7 @@ describe("api auth and authorization", () => {
     repository = new InMemoryAuthRepository();
     repository.addUser("admin-key", { id: 1, email: "admin@openclaw.local", role: "admin" });
     repository.addUser("operator-key", { id: 2, email: "operator@openclaw.local", role: "operator" });
+    repository.addUser("reviewer-key", { id: 3, email: "reviewer@openclaw.local", role: "reviewer" });
     app = buildServer({ authRepository: repository });
   });
 
@@ -213,5 +220,29 @@ describe("api auth and authorization", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toContain("source, category, location");
+  });
+
+  it("returns opportunities list for reviewer role", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "Craigslist",
+        category: "Electronics",
+        location: "San Francisco, CA",
+        title: "Nintendo Switch",
+        priceUsd: 250
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/opportunities",
+      headers: { "x-api-key": "reviewer-key" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().opportunities).toHaveLength(1);
   });
 });

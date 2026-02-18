@@ -40,6 +40,12 @@ export type OpportunityRecord = {
   location: string;
   askValueUsd: number;
   dedupeKey: string;
+  createdAt: string;
+};
+
+export type OpportunityListOptions = {
+  status?: string;
+  limit?: number;
 };
 
 export interface AuthRepository {
@@ -48,6 +54,7 @@ export interface AuthRepository {
   upsertPolicyRule(rule: PolicyRuleInput): Promise<void>;
   findOpportunityByDedupeKey(dedupeKey: string): Promise<OpportunityRecord | null>;
   createOpportunity(input: OpportunityCreateInput): Promise<OpportunityRecord>;
+  listOpportunities(options: OpportunityListOptions): Promise<OpportunityRecord[]>;
   close?: () => Promise<void>;
 }
 
@@ -105,9 +112,10 @@ export class PgAuthRepository implements AuthRepository {
       location: string;
       ask_value_usd: string;
       dedupe_key: string;
+      created_at: string;
     }>(
       `
-      SELECT id, status, source, category, location, ask_value_usd, dedupe_key
+      SELECT id, status, source, category, location, ask_value_usd, dedupe_key, created_at
       FROM opportunities
       WHERE dedupe_key = $1
       LIMIT 1
@@ -127,7 +135,8 @@ export class PgAuthRepository implements AuthRepository {
       category: row.category,
       location: row.location,
       askValueUsd: Number(row.ask_value_usd),
-      dedupeKey: row.dedupe_key
+      dedupeKey: row.dedupe_key,
+      createdAt: row.created_at
     };
   }
 
@@ -140,6 +149,7 @@ export class PgAuthRepository implements AuthRepository {
       location: string;
       ask_value_usd: string;
       dedupe_key: string;
+      created_at: string;
     }>(
       `
       INSERT INTO opportunities (
@@ -152,7 +162,7 @@ export class PgAuthRepository implements AuthRepository {
         dedupe_key
       )
       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-      RETURNING id, status, source, category, location, ask_value_usd, dedupe_key
+      RETURNING id, status, source, category, location, ask_value_usd, dedupe_key, created_at
       `,
       [
         input.source,
@@ -174,8 +184,52 @@ export class PgAuthRepository implements AuthRepository {
       category: row.category,
       location: row.location,
       askValueUsd: Number(row.ask_value_usd),
-      dedupeKey: row.dedupe_key
+      dedupeKey: row.dedupe_key,
+      createdAt: row.created_at
     };
+  }
+
+  async listOpportunities(options: OpportunityListOptions): Promise<OpportunityRecord[]> {
+    const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+    const values: Array<string | number> = [limit];
+
+    const whereStatus = options.status
+      ? (() => {
+          values.push(options.status);
+          return "WHERE status = $2";
+        })()
+      : "";
+
+    const result = await this.pool.query<{
+      id: number;
+      status: string;
+      source: string;
+      category: string;
+      location: string;
+      ask_value_usd: string;
+      dedupe_key: string;
+      created_at: string;
+    }>(
+      `
+      SELECT id, status, source, category, location, ask_value_usd, dedupe_key, created_at
+      FROM opportunities
+      ${whereStatus}
+      ORDER BY created_at DESC
+      LIMIT $1
+      `,
+      values
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      source: row.source,
+      category: row.category,
+      location: row.location,
+      askValueUsd: Number(row.ask_value_usd),
+      dedupeKey: row.dedupe_key,
+      createdAt: row.created_at
+    }));
   }
 
   async close(): Promise<void> {
