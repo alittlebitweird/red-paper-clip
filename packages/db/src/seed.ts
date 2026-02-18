@@ -15,8 +15,15 @@ const run = async () => {
       INSERT INTO policy_rules (platform, action, allowed, reason, last_reviewed_at)
       VALUES
         ('etsy', 'off_platform_transaction', false, 'Etsy policy disallows off-platform transaction completion for Etsy-originated sales.', CURRENT_DATE),
+        ('ebay', 'off_platform_transaction', false, 'eBay policy disallows offers to buy or sell outside eBay.', CURRENT_DATE),
+        ('ebay', 'pre_checkout_contact_exchange', false, 'Sharing direct contact details before checkout is restricted on eBay.', CURRENT_DATE),
         ('ebay', 'autonomous_checkout', false, 'Autonomous end-to-end checkout should remain human-approved unless explicitly permitted.', CURRENT_DATE),
+        ('facebook_marketplace', 'service_listing', false, 'Marketplace listings must be for physical items, not services.', CURRENT_DATE),
+        ('facebook_marketplace', 'iso_listing', false, 'In-search-of listings should not be posted as item listings.', CURRENT_DATE),
         ('craigslist', 'automated_posting', false, 'Automated posting or scraping-style activity is disallowed.', CURRENT_DATE),
+        ('craigslist', 'miscategorized_posting', false, 'Posts must be in the correct category and geography.', CURRENT_DATE),
+        ('craigslist', 'non_local_posting', false, 'Listings should remain local and relevant to the posting area.', CURRENT_DATE),
+        ('offerup', 'service_listing', false, 'OfferUp feed is for tangible goods, not service listings.', CURRENT_DATE),
         ('offerup', 'automated_messaging', false, 'Automated messaging and transaction automation is disallowed.', CURRENT_DATE)
       ON CONFLICT (platform, action)
       DO UPDATE SET

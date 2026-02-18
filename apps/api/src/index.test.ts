@@ -27,7 +27,7 @@ class DeterministicTaskProvider implements TaskProvider {
 }
 
 class FailingTaskProvider implements TaskProvider {
-  async createTask() {
+  async createTask(): Promise<{ providerName: string; providerTaskId: string }> {
     throw new Error("provider offline");
   }
 }

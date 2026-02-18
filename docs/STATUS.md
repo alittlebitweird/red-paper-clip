@@ -3,7 +3,7 @@
 Project codename: kilo-mcclain-clawdbot
 
 ## Current Phase
-Implementation complete for `RPC-001` through `RPC-019`.
+Implementation complete for `RPC-001` through `RPC-020`.
 
 ## Tracking Files
 - `docs/MVP-SPEC.md` for architecture and success metrics

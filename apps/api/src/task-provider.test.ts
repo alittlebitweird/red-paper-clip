@@ -22,12 +22,16 @@ describe("task provider configuration", () => {
 
 describe("RentAHumanApiProvider", () => {
   it("posts bounty payload and returns provider task id", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ id: "bounty-123" }), {
+    let capturedUrl: URL | RequestInfo = "";
+    let capturedInit: RequestInit | undefined;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      capturedUrl = input;
+      capturedInit = init;
+      return new Response(JSON.stringify({ id: "bounty-123" }), {
         status: 201,
         headers: { "content-type": "application/json" }
-      })
-    );
+      });
+    });
 
     const provider = new RentAHumanApiProvider({
       baseUrl: "https://api.rentahuman.ai/",
@@ -53,12 +57,10 @@ describe("RentAHumanApiProvider", () => {
       providerTaskId: "bounty-123"
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(capturedUrl)).toBe("https://api.rentahuman.ai/api/bounties");
+    expect(capturedInit?.method).toBe("POST");
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.rentahuman.ai/api/bounties");
-    expect(init.method).toBe("POST");
-
-    const payload = JSON.parse(String(init.body));
+    const payload = JSON.parse(String(capturedInit?.body));
     expect(payload.title).toBe("Pickup package");
     expect(payload.budget).toBe(42);
     expect(payload.location).toBe("Austin, TX");

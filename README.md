@@ -74,6 +74,12 @@ npm run db:migrate:down -w @rpc/db
 - `POST /outbound/actions` (roles: `admin`, `operator`)
 - Evaluates platform/action against `policy_rules`
 - Blocks disallowed actions with `policyCode` and logs policy decisions
+- Seed includes baseline deny rules for:
+  - `etsy.off_platform_transaction`
+  - `ebay.off_platform_transaction`, `ebay.pre_checkout_contact_exchange`, `ebay.autonomous_checkout`
+  - `facebook_marketplace.service_listing`, `facebook_marketplace.iso_listing`
+  - `craigslist.automated_posting`, `craigslist.miscategorized_posting`, `craigslist.non_local_posting`
+  - `offerup.service_listing`, `offerup.automated_messaging`
 
 ## Offer Workflow API
 - `POST /offers/draft` (roles: `admin`, `operator`)

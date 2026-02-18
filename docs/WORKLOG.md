@@ -43,6 +43,8 @@
 - Implemented `RPC-018`: configurable task provider factory with RentAHuman API adapter and provider tests.
 - Updated trackers and docs for `RPC-018` completion (`cbffe5e`).
 - Implemented `RPC-019`: controlled task-provider failure handling with `502` response and audit event.
+- Updated trackers for `RPC-019` completion (`f1309b7`).
+- Implemented `RPC-020`: expanded default marketplace policy seed rules for safer outbound actions.
 
 ## Log Format
 - Date
