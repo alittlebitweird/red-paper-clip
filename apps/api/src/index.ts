@@ -21,7 +21,7 @@ import {
   type PortfolioStatus
 } from "./portfolio-state-machine.js";
 import { rankCandidates } from "./scoring.js";
-import { RentAHumanStubProvider, type TaskProvider } from "./task-provider.js";
+import { createTaskProviderFromEnv, type TaskProvider } from "./task-provider.js";
 import { computeValuation } from "./valuation.js";
 
 declare module "fastify" {
@@ -235,7 +235,7 @@ const getDefaultAuthRepository = () => {
 export const buildServer = (options: BuildServerOptions = {}) => {
   const app = Fastify({ logger: true });
   const authRepository = options.authRepository ?? getDefaultAuthRepository();
-  const taskProvider = options.taskProvider ?? new RentAHumanStubProvider();
+  const taskProvider = options.taskProvider ?? createTaskProviderFromEnv();
   const allowedOfferTransitions: Record<OfferStatus, OfferStatus[]> = {
     draft: ["approved", "rejected"],
     approved: ["sent", "rejected"],

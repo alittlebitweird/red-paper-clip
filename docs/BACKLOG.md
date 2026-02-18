@@ -26,6 +26,7 @@ Project codename: kilo-mcclain-clawdbot
 ## Milestone 4: Strategy and Operations
 - [x] RPC-016 Research brief for marketplace policy-safe growth and RentAHuman operating model
 - [x] RPC-017 Automated full-workflow proof from `seeded` to `completed`
+- [x] RPC-018 Configurable task provider factory with RentAHuman API adapter and tests
 
 ## MVP Definition of Done
 - [x] Seed item reaches `completed` state through full workflow

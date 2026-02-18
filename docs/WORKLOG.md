@@ -39,6 +39,8 @@
 - Implemented `RPC-016`: source-backed research brief for RentAHuman execution strategy and policy-safe marketplace operations.
 - Updated trackers and backlog for `RPC-016` completion (`a44f585`).
 - Implemented `RPC-017`: automated end-to-end API proof for `seeded -> completed` workflow.
+- Updated trackers and DoD for `RPC-017` completion (`d8474e3`).
+- Implemented `RPC-018`: configurable task provider factory with RentAHuman API adapter and provider tests.
 
 ## Log Format
 - Date

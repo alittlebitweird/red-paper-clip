@@ -84,10 +84,19 @@ npm run db:migrate:down -w @rpc/db
 
 ## Task Execution API
 - `POST /tasks` (roles: `admin`, `operator`)
-- Dispatches `inspect/pickup/meet/ship` through provider adapter (`rentahuman_stub`)
+- Dispatches `inspect/pickup/meet/ship` through provider adapter (`rentahuman_stub` by default)
 - `POST /tasks/webhook/provider` updates task status from provider callbacks (`x-webhook-token`)
 - `POST /tasks/:taskId/evidence` stores proof metadata with checksum and capture timestamp
 - `GET /tasks/:taskId/evidence` retrieves evidence by task
+
+## Task Provider Configuration
+- `TASK_PROVIDER=rentahuman_stub` (default local deterministic provider)
+- `TASK_PROVIDER=rentahuman_api` enables live RentAHuman bounty creation
+- Required when using `rentahuman_api`:
+  - `RENTAHUMAN_BASE_URL`
+  - `RENTAHUMAN_API_KEY`
+- Optional:
+  - `RENTAHUMAN_TIMEOUT_MS` (request timeout in milliseconds, default `10000`)
 
 ## Portfolio State API
 - `POST /portfolio/positions` creates a seeded portfolio position
