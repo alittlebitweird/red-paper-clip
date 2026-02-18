@@ -29,6 +29,8 @@
 - Implemented `RPC-010`: task-provider adapter and webhook status updates (`f4f4994`).
 - Updated local trackers for `RPC-010` completion (`4b075a6`).
 - Implemented `RPC-011`: evidence capture and retrieval pipeline linked to tasks (`2eab9be`).
+- Updated local trackers for `RPC-011` completion (`df57343`).
+- Implemented `RPC-012` and `RPC-013`: verification checklist workflow and portfolio state machine (`6657ea4`).
 
 ## Log Format
 - Date
