@@ -47,6 +47,8 @@
 - Implemented `RPC-020`: expanded default marketplace policy seed rules for safer outbound actions.
 - Updated trackers for `RPC-020` completion (`f63b616`).
 - Implemented `RPC-021`: policy rule listing endpoint with filter/limit support and API tests.
+- Updated trackers for `RPC-021` completion (`77f9513`).
+- Implemented `RPC-022`: deployment pack with container stack, preflight/deploy scripts, and deployment runbook.
 
 ## Log Format
 - Date

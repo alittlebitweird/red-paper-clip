@@ -30,6 +30,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-019 Task dispatch reliability with controlled provider failure handling
 - [x] RPC-020 Expanded default policy seed pack for marketplace-safe operations
 - [x] RPC-021 Policy rule visibility endpoint for ops and reviewer roles
+- [x] RPC-022 Deployment pack (compose, env templates, preflight/deploy scripts, runbook)
 
 ## MVP Definition of Done
 - [x] Seed item reaches `completed` state through full workflow

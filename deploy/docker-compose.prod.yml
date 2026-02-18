@@ -1,0 +1,103 @@
+name: red-paper-clip
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      OPERATOR_API_KEY: ${OPERATOR_API_KEY}
+      REVIEWER_API_KEY: ${REVIEWER_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -lc "
+      npm run db:migrate:up -w @rpc/db &&
+      npm run db:seed -w @rpc/db
+      "
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      API_PORT: 3001
+      DATABASE_URL: ${DATABASE_URL}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      OPERATOR_API_KEY: ${OPERATOR_API_KEY}
+      REVIEWER_API_KEY: ${REVIEWER_API_KEY}
+      PROVIDER_WEBHOOK_TOKEN: ${PROVIDER_WEBHOOK_TOKEN}
+      TASK_PROVIDER: ${TASK_PROVIDER:-rentahuman_stub}
+      RENTAHUMAN_BASE_URL: ${RENTAHUMAN_BASE_URL:-https://api.rentahuman.ai}
+      RENTAHUMAN_API_KEY: ${RENTAHUMAN_API_KEY:-}
+      RENTAHUMAN_TIMEOUT_MS: ${RENTAHUMAN_TIMEOUT_MS:-10000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${API_PORT:-3001}:3001"
+    command: ["node", "apps/api/dist/index.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      WEB_PORT: 3000
+      API_BASE_URL: ${WEB_API_BASE_URL}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    command: ["node", "apps/web/dist/index.js"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      WORKER_HEARTBEAT_MS: ${WORKER_HEARTBEAT_MS:-10000}
+      API_BASE_URL: ${WORKER_API_BASE_URL:-http://api:3001}
+      AUTO_SNAPSHOT_ENABLED: ${AUTO_SNAPSHOT_ENABLED:-false}
+      SNAPSHOT_API_KEY: ${SNAPSHOT_API_KEY}
+      SNAPSHOT_INTERVAL_MS: ${SNAPSHOT_INTERVAL_MS:-86400000}
+      SEED_COST_USD: ${SEED_COST_USD:-0.9}
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["node", "apps/worker/dist/index.js"]
+
+volumes:
+  postgres_data:

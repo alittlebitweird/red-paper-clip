@@ -41,6 +41,27 @@ npm run smoke
 npm run simulate -- 42 10 0.9
 ```
 
+## Deployment (Containerized)
+1. Copy production env template:
+```bash
+cp .env.production.example .env.production
+```
+2. Fill real secrets/keys in `.env.production`.
+3. Validate deploy configuration:
+```bash
+npm run deploy:preflight
+```
+4. Deploy services (Postgres + migrations/seed + API/Web/Worker):
+```bash
+npm run deploy:start
+```
+5. Stop deployed stack:
+```bash
+npm run deploy:stop
+```
+
+Deployment only provisions the platform. It does not start any trade sourcing loop on its own.
+
 ## Database commands
 ```bash
 npm run db:migrate:up -w @rpc/db
