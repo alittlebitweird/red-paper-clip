@@ -37,6 +37,8 @@ npm run lint
 npm run test
 npm run typecheck
 npm run build
+npm run smoke
+npm run simulate -- 42 10 0.9
 ```
 
 ## Database commands

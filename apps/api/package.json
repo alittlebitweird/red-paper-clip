@@ -9,6 +9,8 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
+    "smoke": "vitest run src/index.test.ts",
+    "simulate": "tsx src/simulation.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
