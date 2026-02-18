@@ -23,6 +23,9 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-014 KPI dashboard
 - [x] RPC-015 Simulation and smoke tests
 
+## Milestone 4: Strategy and Operations
+- [x] RPC-016 Research brief for marketplace policy-safe growth and RentAHuman operating model
+
 ## MVP Definition of Done
 - [ ] Seed item reaches `completed` state through full workflow
 - [x] Every decision and action is audit-logged
