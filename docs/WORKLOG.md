@@ -19,6 +19,8 @@
 - Implemented `RPC-005`: manual intake/review UI and API opportunity list endpoint (`18d10b6`).
 - Updated local trackers for `RPC-005` completion (`6f5b6d7`).
 - Implemented `RPC-006`: valuation engine, confidence scoring, and versioned persistence (`ee3e8ee`).
+- Updated local trackers for `RPC-006` completion (`7e699f0`).
+- Implemented `RPC-007`: weighted scoring engine and ranked opportunity endpoint (`f0f5c45`).
 
 ## Log Format
 - Date
