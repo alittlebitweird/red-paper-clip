@@ -11,6 +11,8 @@
 - Added GitHub Actions CI for lint/test/typecheck/build (`47425ac`).
 - Documented local startup workflow and marked `RPC-001` complete (`226bfc1`).
 - Implemented `RPC-002`: reversible SQL migrations, migration runner, and seed script in `packages/db` (`df90254`).
+- Documented DB commands and marked `RPC-002` complete (`ba5e704`).
+- Implemented `RPC-003`: role-based auth routes, protected actions, and audit logging (`8e3898d`).
 
 ## Log Format
 - Date
