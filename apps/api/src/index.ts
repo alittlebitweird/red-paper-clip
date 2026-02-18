@@ -798,11 +798,25 @@ export const buildServer = (options: BuildServerOptions = {}) => {
         return reply.status(400).send({ error: "type must be one of inspect, pickup, meet, ship" });
       }
 
-      const providerTask = await taskProvider.createTask({
-        type: taskType,
-        assignee: request.body.assignee,
-        metadata: request.body.metadata
-      });
+      let providerTask: Awaited<ReturnType<TaskProvider["createTask"]>>;
+      try {
+        providerTask = await taskProvider.createTask({
+          type: taskType,
+          assignee: request.body.assignee,
+          metadata: request.body.metadata
+        });
+      } catch (error) {
+        await authRepository.writeEvent({
+          eventType: "task.dispatch_failed",
+          entityType: "task_provider",
+          entityId: taskType,
+          payload: {
+            actorUserId: user.id,
+            error: error instanceof Error ? error.message : "Unknown provider error"
+          }
+        });
+        return reply.status(502).send({ error: "Task provider unavailable" });
+      }
 
       const task = await authRepository.createTaskRecord({
         type: taskType,

@@ -26,6 +26,12 @@ class DeterministicTaskProvider implements TaskProvider {
   }
 }
 
+class FailingTaskProvider implements TaskProvider {
+  async createTask() {
+    throw new Error("provider offline");
+  }
+}
+
 class InMemoryAuthRepository implements AuthRepository {
   private readonly usersByHash = new Map<string, AuthUser>();
   private readonly opportunitiesByDedupeKey = new Map<string, OpportunityRecord>();
@@ -780,6 +786,39 @@ describe("api auth and authorization", () => {
     expect(createdTask.json().providerName).toBe("rentahuman_stub");
     expect(webhook.statusCode).toBe(200);
     expect(webhook.json().status).toBe("completed");
+  });
+
+  it("returns 502 when task provider dispatch fails", async () => {
+    const failingRepository = new InMemoryAuthRepository();
+    failingRepository.addUser("operator-key", { id: 2, email: "operator@openclaw.local", role: "operator" });
+    const failingApp = buildServer({
+      authRepository: failingRepository,
+      taskProvider: new FailingTaskProvider()
+    });
+
+    try {
+      const response = await failingApp.inject({
+        method: "POST",
+        url: "/tasks",
+        headers: { "x-api-key": "operator-key" },
+        payload: {
+          type: "inspect",
+          assignee: "runner-1"
+        }
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json().error).toBe("Task provider unavailable");
+      expect(failingRepository.events).toContainEqual(
+        expect.objectContaining({
+          eventType: "task.dispatch_failed",
+          entityType: "task_provider",
+          entityId: "inspect"
+        })
+      );
+    } finally {
+      await failingApp.close();
+    }
   });
 
   it("captures and lists evidence linked to task ids", async () => {

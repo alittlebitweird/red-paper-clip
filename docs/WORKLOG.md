@@ -41,6 +41,8 @@
 - Implemented `RPC-017`: automated end-to-end API proof for `seeded -> completed` workflow.
 - Updated trackers and DoD for `RPC-017` completion (`d8474e3`).
 - Implemented `RPC-018`: configurable task provider factory with RentAHuman API adapter and provider tests.
+- Updated trackers and docs for `RPC-018` completion (`cbffe5e`).
+- Implemented `RPC-019`: controlled task-provider failure handling with `502` response and audit event.
 
 ## Log Format
 - Date

@@ -27,6 +27,7 @@ Project codename: kilo-mcclain-clawdbot
 - [x] RPC-016 Research brief for marketplace policy-safe growth and RentAHuman operating model
 - [x] RPC-017 Automated full-workflow proof from `seeded` to `completed`
 - [x] RPC-018 Configurable task provider factory with RentAHuman API adapter and tests
+- [x] RPC-019 Task dispatch reliability with controlled provider failure handling
 
 ## MVP Definition of Done
 - [x] Seed item reaches `completed` state through full workflow
