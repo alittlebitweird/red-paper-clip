@@ -15,6 +15,8 @@
 - Implemented `RPC-003`: role-based auth routes, protected actions, and audit logging (`8e3898d`).
 - Updated local trackers for `RPC-003` completion (`b122c94`).
 - Implemented `RPC-004`: opportunity intake validation, duplicate detection, and normalization (`7392acf`).
+- Updated local trackers for `RPC-004` completion (`83d7542`).
+- Implemented `RPC-005`: manual intake/review UI and API opportunity list endpoint (`18d10b6`).
 
 ## Log Format
 - Date
