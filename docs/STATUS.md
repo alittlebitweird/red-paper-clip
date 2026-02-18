@@ -3,7 +3,7 @@
 Project codename: kilo-mcclain-clawdbot
 
 ## Current Phase
-Implementation in progress. `RPC-001` is complete.
+Implementation in progress. `RPC-001` and `RPC-002` are complete.
 
 ## Tracking Files
 - `docs/MVP-SPEC.md` for architecture and success metrics
@@ -11,6 +11,6 @@ Implementation in progress. `RPC-001` is complete.
 - `docs/WORKLOG.md` for chronological progress
 
 ## Next Implementation Tickets
-- RPC-002 Database schema and migrations
 - RPC-003 Auth and roles
 - RPC-004 Opportunity intake API
+- RPC-005 Manual ops UI for intake and review

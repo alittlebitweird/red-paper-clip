@@ -9,6 +9,8 @@
 - Configured remote `origin` and pushed `main`.
 - Implemented `RPC-001`: monorepo scaffold, app skeletons, and baseline lint/test/typecheck (`f03b3eb`).
 - Added GitHub Actions CI for lint/test/typecheck/build (`47425ac`).
+- Documented local startup workflow and marked `RPC-001` complete (`226bfc1`).
+- Implemented `RPC-002`: reversible SQL migrations, migration runner, and seed script in `packages/db` (`df90254`).
 
 ## Log Format
 - Date

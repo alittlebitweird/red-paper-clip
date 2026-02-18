@@ -4,7 +4,7 @@ Project codename: kilo-mcclain-clawdbot
 
 ## Milestone 1: MVP Foundation (Week 1)
 - [x] RPC-001 Repo bootstrap and CI
-- [ ] RPC-002 Database schema and migrations
+- [x] RPC-002 Database schema and migrations
 - [ ] RPC-003 Auth and roles
 - [ ] RPC-004 Opportunity intake API
 - [ ] RPC-005 Manual ops UI for intake and review

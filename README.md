@@ -34,3 +34,14 @@ npm run test
 npm run typecheck
 npm run build
 ```
+
+## Database commands
+```bash
+npm run db:migrate:up -w @rpc/db
+npm run db:seed -w @rpc/db
+```
+
+To roll back one migration:
+```bash
+npm run db:migrate:down -w @rpc/db
+```
