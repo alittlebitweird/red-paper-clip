@@ -1,13 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { type AuditEvent, type AuthRepository, type AuthUser, type PolicyRuleInput } from "./auth-repository.js";
+import {
+  type AuditEvent,
+  type AuthRepository,
+  type AuthUser,
+  type OpportunityCreateInput,
+  type OpportunityRecord,
+  type PolicyRuleInput
+} from "./auth-repository.js";
 import { hashApiKey } from "./hash-api-key.js";
 import { buildServer } from "./index.js";
 
 class InMemoryAuthRepository implements AuthRepository {
   private readonly usersByHash = new Map<string, AuthUser>();
+  private readonly opportunitiesByDedupeKey = new Map<string, OpportunityRecord>();
   public readonly events: AuditEvent[] = [];
   public readonly policyRules: PolicyRuleInput[] = [];
+  private opportunityIdSequence = 1;
 
   addUser(apiKey: string, user: AuthUser) {
     this.usersByHash.set(hashApiKey(apiKey), user);
@@ -23,6 +32,25 @@ class InMemoryAuthRepository implements AuthRepository {
 
   async upsertPolicyRule(rule: PolicyRuleInput): Promise<void> {
     this.policyRules.push(rule);
+  }
+
+  async findOpportunityByDedupeKey(dedupeKey: string): Promise<OpportunityRecord | null> {
+    return this.opportunitiesByDedupeKey.get(dedupeKey) ?? null;
+  }
+
+  async createOpportunity(input: OpportunityCreateInput): Promise<OpportunityRecord> {
+    const record: OpportunityRecord = {
+      id: this.opportunityIdSequence,
+      status: "sourcing",
+      source: input.source,
+      category: input.category,
+      location: input.location,
+      askValueUsd: input.askValueUsd,
+      dedupeKey: input.dedupeKey
+    };
+    this.opportunityIdSequence += 1;
+    this.opportunitiesByDedupeKey.set(input.dedupeKey, record);
+    return record;
   }
 }
 
@@ -114,5 +142,76 @@ describe("api auth and authorization", () => {
         entityId: "etsy:off_platform_transaction"
       })
     );
+  });
+
+  it("creates normalized opportunities for operator users", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "  Craigslist ",
+        category: " Electronics ",
+        location: " San Francisco, CA ",
+        title: " Nintendo Switch ",
+        priceUsd: 250
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      source: "craigslist",
+      category: "electronics",
+      location: "san francisco, ca",
+      askValueUsd: 250
+    });
+    expect(repository.events).toContainEqual(
+      expect.objectContaining({
+        eventType: "opportunity.created",
+        entityType: "opportunity"
+      })
+    );
+  });
+
+  it("rejects duplicate opportunities using dedupe key", async () => {
+    const payload = {
+      source: "Craigslist",
+      category: "Electronics",
+      location: "San Francisco, CA",
+      title: "Nintendo Switch",
+      priceUsd: 250
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(409);
+    expect(second.json().error).toBe("Duplicate opportunity");
+  });
+
+  it("validates required opportunity fields", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/opportunities",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        source: "Craigslist",
+        priceUsd: 0
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("source, category, location");
   });
 });

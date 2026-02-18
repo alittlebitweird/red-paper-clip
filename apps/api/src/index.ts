@@ -4,6 +4,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
 import {
   type AuthRepository,
+  type OpportunityCreateInput,
   type AuthUser,
   type PolicyRuleInput,
   type UserRole,
@@ -19,6 +20,58 @@ declare module "fastify" {
 
 type BuildServerOptions = {
   authRepository?: AuthRepository;
+};
+
+type OpportunityIntakeBody = {
+  source?: string;
+  category?: string;
+  location?: string;
+  title?: string;
+  priceUsd?: number;
+};
+
+type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
+
+const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const parseOpportunityInput = (
+  body: OpportunityIntakeBody
+): ValidationResult<OpportunityCreateInput> => {
+  const source = typeof body.source === "string" ? normalizeText(body.source) : "";
+  const category = typeof body.category === "string" ? normalizeText(body.category) : "";
+  const location = typeof body.location === "string" ? normalizeText(body.location) : "";
+  const title = typeof body.title === "string" && body.title.trim().length > 0 ? body.title.trim() : "untitled";
+  const priceUsd = typeof body.priceUsd === "number" ? body.priceUsd : NaN;
+
+  if (!source || !category || !location || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+    return {
+      valid: false,
+      error: "source, category, location, and positive priceUsd are required"
+    };
+  }
+
+  const roundedPrice = Number(priceUsd.toFixed(2));
+  const dedupeKey = hashApiKey(`${source}|${category}|${location}|${title.toLowerCase()}|${roundedPrice.toFixed(2)}`);
+
+  return {
+    valid: true,
+    value: {
+      source,
+      category,
+      location,
+      title,
+      askValueUsd: roundedPrice,
+      dedupeKey,
+      normalizedPayload: {
+        source,
+        category,
+        location,
+        title,
+        priceUsd: roundedPrice,
+        normalizationVersion: 1
+      }
+    }
+  };
 };
 
 const getDefaultAuthRepository = () => {
@@ -126,6 +179,48 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       });
 
       return reply.status(200).send({ status: "ok" });
+    }
+  );
+
+  app.post<{ Body: OpportunityIntakeBody }>(
+    "/opportunities",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const parsed = parseOpportunityInput(request.body);
+
+      if (!parsed.valid) {
+        return reply.status(400).send({ error: parsed.error });
+      }
+
+      const existing = await authRepository.findOpportunityByDedupeKey(parsed.value.dedupeKey);
+
+      if (existing) {
+        return reply.status(409).send({
+          error: "Duplicate opportunity",
+          opportunityId: existing.id
+        });
+      }
+
+      const created = await authRepository.createOpportunity(parsed.value);
+      await authRepository.writeEvent({
+        eventType: "opportunity.created",
+        entityType: "opportunity",
+        entityId: String(created.id),
+        payload: {
+          actorUserId: user.id,
+          role: user.role,
+          source: created.source,
+          category: created.category
+        }
+      });
+
+      return reply.status(201).send(created);
     }
   );
 
