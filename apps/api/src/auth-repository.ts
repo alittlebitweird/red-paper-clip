@@ -81,6 +81,13 @@ export type ScoringCandidateRecord = {
   expiresAt?: string;
 };
 
+export type PolicyRuleRecord = {
+  platform: string;
+  action: string;
+  allowed: boolean;
+  reason: string;
+};
+
 export interface AuthRepository {
   findUserByApiKeyHash(apiKeyHash: string): Promise<AuthUser | null>;
   writeEvent(event: AuditEvent): Promise<void>;
@@ -90,6 +97,7 @@ export interface AuthRepository {
   listOpportunities(options: OpportunityListOptions): Promise<OpportunityRecord[]>;
   recordValuation(input: RecordValuationInput): Promise<ValuationRecord>;
   listScoringCandidates(limit: number): Promise<ScoringCandidateRecord[]>;
+  getPolicyRule(platform: string, action: string): Promise<PolicyRuleRecord | null>;
   close?: () => Promise<void>;
 }
 
@@ -366,6 +374,29 @@ export class PgAuthRepository implements AuthRepository {
       sellerRepScore: row.seller_rep_score ? Number(row.seller_rep_score) : undefined,
       expiresAt: row.expires_at ?? undefined
     }));
+  }
+
+  async getPolicyRule(platform: string, action: string): Promise<PolicyRuleRecord | null> {
+    const result = await this.pool.query<{
+      platform: string;
+      action: string;
+      allowed: boolean;
+      reason: string;
+    }>(
+      `
+      SELECT platform, action, allowed, reason
+      FROM policy_rules
+      WHERE platform = $1 AND action = $2
+      LIMIT 1
+      `,
+      [platform, action]
+    );
+
+    if (!result.rowCount || result.rowCount < 1) {
+      return null;
+    }
+
+    return result.rows[0];
   }
 
   async close(): Promise<void> {

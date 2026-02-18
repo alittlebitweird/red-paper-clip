@@ -36,6 +36,10 @@ class InMemoryAuthRepository implements AuthRepository {
     this.policyRules.push(rule);
   }
 
+  async getPolicyRule(platform: string, action: string) {
+    return this.policyRules.find((rule) => rule.platform === platform && rule.action === action) ?? null;
+  }
+
   async findOpportunityByDedupeKey(dedupeKey: string): Promise<OpportunityRecord | null> {
     return this.opportunitiesByDedupeKey.get(dedupeKey) ?? null;
   }
@@ -344,5 +348,53 @@ describe("api auth and authorization", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().ranked).toHaveLength(1);
     expect(response.json().ranked[0]).toHaveProperty("tradeScore");
+  });
+
+  it("blocks outbound actions when policy denies them", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/admin/policy-rules",
+      headers: { "x-api-key": "admin-key" },
+      payload: {
+        platform: "etsy",
+        action: "off_platform_transaction",
+        allowed: false,
+        reason: "blocked by marketplace terms"
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/outbound/actions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        platform: "etsy",
+        action: "off_platform_transaction"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().allowed).toBe(false);
+    expect(response.json().policyCode).toContain("POLICY_ETSY_OFF_PLATFORM_TRANSACTION");
+    expect(repository.events).toContainEqual(
+      expect.objectContaining({
+        eventType: "policy.decision"
+      })
+    );
+  });
+
+  it("allows outbound actions when no deny rule exists", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/outbound/actions",
+      headers: { "x-api-key": "operator-key" },
+      payload: {
+        platform: "craigslist",
+        action: "schedule_meetup"
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().allowed).toBe(true);
   });
 });

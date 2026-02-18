@@ -67,3 +67,8 @@ npm run db:migrate:down -w @rpc/db
 ## Scoring API
 - `POST /scoring/rank` (roles: `admin`, `operator`)
 - Ranks current opportunities using weighted trade-score formula
+
+## Policy Guard API
+- `POST /outbound/actions` (roles: `admin`, `operator`)
+- Evaluates platform/action against `policy_rules`
+- Blocks disallowed actions with `policyCode` and logs policy decisions

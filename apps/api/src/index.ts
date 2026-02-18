@@ -51,6 +51,12 @@ type ScoringRequestBody = {
   limit?: number;
 };
 
+type OutboundActionBody = {
+  platform?: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+};
+
 type ValidationResult<T> = { valid: true; value: T } | { valid: false; error: string };
 
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -153,6 +159,36 @@ const getDefaultAuthRepository = () => {
 export const buildServer = (options: BuildServerOptions = {}) => {
   const app = Fastify({ logger: true });
   const authRepository = options.authRepository ?? getDefaultAuthRepository();
+
+  const evaluatePolicy = async (
+    platform: string,
+    action: string,
+    actorUserId: number
+  ): Promise<{ allowed: boolean; reason: string; policyCode: string }> => {
+    const normalizedPlatform = normalizeText(platform);
+    const normalizedAction = normalizeText(action);
+    const rule = await authRepository.getPolicyRule(normalizedPlatform, normalizedAction);
+
+    const allowed = rule ? rule.allowed : true;
+    const reason = rule ? rule.reason : "No explicit deny rule found.";
+    const policyCode = rule
+      ? `POLICY_${normalizedPlatform.toUpperCase()}_${normalizedAction.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`
+      : "POLICY_DEFAULT_ALLOW";
+
+    await authRepository.writeEvent({
+      eventType: "policy.decision",
+      entityType: "policy_rule",
+      entityId: `${normalizedPlatform}:${normalizedAction}`,
+      payload: {
+        actorUserId,
+        allowed,
+        reason,
+        policyCode
+      }
+    });
+
+    return { allowed, reason, policyCode };
+  };
 
   const requireRole = (allowedRoles: UserRole[]) => {
     return async (request: FastifyRequest, reply: FastifyReply) => {
@@ -372,6 +408,41 @@ export const buildServer = (options: BuildServerOptions = {}) => {
       const ranked = rankCandidates(candidates, currentItemValueUsd, Math.max(1, Math.min(limit, 50)));
 
       return reply.status(200).send({ ranked });
+    }
+  );
+
+  app.post<{ Body: OutboundActionBody }>(
+    "/outbound/actions",
+    { preHandler: requireRole(["admin", "operator"]) },
+    async (request, reply) => {
+      const user = request.authUser;
+
+      if (!user) {
+        return reply.status(401).send({ error: "Unauthorized" });
+      }
+
+      const platform = typeof request.body.platform === "string" ? request.body.platform : "";
+      const action = typeof request.body.action === "string" ? request.body.action : "";
+
+      if (!platform || !action) {
+        return reply.status(400).send({ error: "platform and action are required" });
+      }
+
+      const decision = await evaluatePolicy(platform, action, user.id);
+
+      if (!decision.allowed) {
+        return reply.status(403).send({
+          allowed: false,
+          policyCode: decision.policyCode,
+          reason: decision.reason
+        });
+      }
+
+      return reply.status(202).send({
+        allowed: true,
+        policyCode: decision.policyCode,
+        status: "queued"
+      });
     }
   );
 
